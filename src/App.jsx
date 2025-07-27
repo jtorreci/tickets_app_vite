@@ -26,13 +26,12 @@ import { Plus, Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, Folder, R
 
 // --- PASO 1: Pega aquí tu configuración de Firebase ---
 const firebaseConfig = {
-  apiKey: "AIzaSyDSgxBTfANOhUKyBDJVuPrxxGZvHyZqcWE",
-  authDomain: "gestor-investigacion-app.firebaseapp.com",
-  projectId: "gestor-investigacion-app",
-  storageBucket: "gestor-investigacion-app.firebasestorage.app",
-  messagingSenderId: "303130285560",
-  appId: "1:303130285560:web:6167e3be7b1deae9dd720d",
-  measurementId: "G-85QXTBFR1E"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID
 };
 
 // --- Inicialización de servicios ---
