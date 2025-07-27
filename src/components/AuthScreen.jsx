@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
-import { Spinner } from './Spinner';
+import Spinner from './Spinner';
 
 export default function AuthScreen({ db, auth, teamCollectionPath }) {
     const [isLogin, setIsLogin] = useState(true);

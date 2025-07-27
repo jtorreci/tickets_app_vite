@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react';
 import TaskCard from './TaskCard';
 
-export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert, onEditTicket, allTasks, loggedInUser, team }) {
+export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert, onEditTicket, onAssign, onDelete, allTasks, loggedInUser, team, onNavigate }) {
     const taskStatusMap = useMemo(() => {
         const map = new Map();
         allTasks.forEach(t => map.set(t.id, t.status));
@@ -27,9 +27,13 @@ export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert
                         onComplete={onComplete} 
                         onRevert={onRevert} 
                         onEdit={onEditTicket} 
+                        onAssign={onAssign}
+                        onDelete={onDelete}
+                        onNavigate={onNavigate}
                         isLocked={title === 'Pendiente' && isTaskLocked(task)} 
                         loggedInUser={loggedInUser} 
                         team={team} 
+                        allTasks={allTasks}
                     />
                 ))}
             </div>

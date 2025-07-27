@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, writeBatch, Timestamp } from 'firebase/firestore';
-import { Plus, Users, LogOut } from 'lucide-react';
+import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc } from 'firebase/firestore';
+import { Plus, Users, LogOut, Home, ChevronRight } from 'lucide-react';
 
 // --- Mis Componentes ---
 import AuthScreen from './components/AuthScreen';
@@ -12,6 +12,7 @@ import Spinner from './components/Spinner';
 import TaskForm from './components/TaskForm';
 import LogHoursModal from './components/LogHoursModal';
 import UserManagement from './components/UserManagement';
+import ProjectsDashboard from './components/ProjectsDashboard';
 
 // --- Lee la configuración de Firebase desde las variables de entorno ---
 const firebaseConfig = {
@@ -32,81 +33,149 @@ const auth = getAuth(app);
 const tasksCollectionPath = `tasks`;
 const teamCollectionPath = `team_members`;
 
+// --- Lógica de Cálculo de Fechas ---
+const calculateDates = (tasks) => {
+    if (!tasks || tasks.length === 0) return [];
+
+    const tasksMap = new Map(tasks.map(t => [t.id, { ...t }]));
+
+    // Forward Pass: Calculate Earliest Start Date (ESD)
+    tasks.forEach(task => {
+        if (!task.dependencies || task.dependencies.length === 0) {
+            tasksMap.get(task.id).earliestStartDate = task.plannedStartDate;
+        } else {
+            const depDates = task.dependencies
+                .map(depId => tasksMap.get(depId)?.expirationDate)
+                .filter(Boolean);
+            
+            if (depDates.length > 0) {
+                const maxDepDate = new Date(Math.max.apply(null, depDates.map(d => d.toDate())));
+                tasksMap.get(task.id).earliestStartDate = Timestamp.fromDate(maxDepDate);
+            } else {
+                tasksMap.get(task.id).earliestStartDate = task.plannedStartDate;
+            }
+        }
+    });
+
+    // Backward Pass: Calculate Latest Finish Date (LFD)
+    const successors = new Map();
+    tasks.forEach(task => {
+        if (task.dependencies) {
+            task.dependencies.forEach(depId => {
+                if (!successors.has(depId)) successors.set(depId, []);
+                successors.get(depId).push(task.id);
+            });
+        }
+    });
+
+    tasks.slice().reverse().forEach(task => {
+        const taskSuccessors = successors.get(task.id);
+        if (!taskSuccessors || taskSuccessors.length === 0) {
+            tasksMap.get(task.id).latestFinishDate = task.expirationDate;
+        } else {
+            const succDates = taskSuccessors
+                .map(succId => tasksMap.get(succId)?.earliestStartDate)
+                .filter(Boolean);
+            
+            if (succDates.length > 0) {
+                const minSuccDate = new Date(Math.min.apply(null, succDates.map(d => d.toDate())));
+                tasksMap.get(task.id).latestFinishDate = Timestamp.fromDate(minSuccDate);
+            } else {
+                 tasksMap.get(task.id).latestFinishDate = task.expirationDate;
+            }
+        }
+    });
+
+    // Calculate Slack
+    tasksMap.forEach(task => {
+        if (task.earliestStartDate && task.latestFinishDate) {
+            const esd = task.earliestStartDate.toDate();
+            const lfd = task.latestFinishDate.toDate();
+            const duration = (task.expectedHours || 0) / 8; // Assuming 8 hours per day
+            const efd = new Date(esd);
+            efd.setDate(efd.getDate() + duration);
+
+            const slack = (lfd - efd) / (1000 * 60 * 60 * 24); // Slack in days
+            task.slack = Math.floor(slack);
+        }
+    });
+
+    return Array.from(tasksMap.values());
+};
+
+
 export default function App() {
     const [loggedInUser, setLoggedInUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [team, setTeam] = useState([]);
-    const [currentView, setCurrentView] = useState({ type: 'dashboard', parentId: null });
     const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
     const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
     const [taskToEdit, setTaskToEdit] = useState(null);
     const [taskToLogHours, setTaskToLogHours] = useState(null);
-    const [tasks, setTasks] = useState([]);
+    
+    const [allTasks, setAllTasks] = useState([]);
+    const [processedTasks, setProcessedTasks] = useState([]);
+    const [currentView, setCurrentView] = useState('dashboard');
+    const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, title: 'Proyectos' }]);
+
+    const currentParentId = breadcrumbs[breadcrumbs.length - 1].id;
+    
+    const activeTasks = useMemo(() => processedTasks.filter(task => !task.deleted), [processedTasks]);
+    const currentTasks = useMemo(() => activeTasks.filter(task => task.parentId === currentParentId), [activeTasks, currentParentId]);
 
     useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+        // ... Auth and Team listeners
+        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
             if (user) {
                 const userDocRef = doc(db, teamCollectionPath, user.uid);
-                const unsubscribeDoc = onSnapshot(userDocRef, (docSnap) => {
-                    if (docSnap.exists()) {
-                        setLoggedInUser({ uid: user.uid, ...docSnap.data() });
-                    }
+                onSnapshot(userDocRef, (docSnap) => {
+                    if (docSnap.exists()) setLoggedInUser({ uid: user.uid, ...docSnap.data() });
                     setIsLoading(false);
                 });
-                return () => unsubscribeDoc();
             } else {
                 setLoggedInUser(null);
                 setIsLoading(false);
             }
         });
+        const unsubscribeTeam = onSnapshot(collection(db, teamCollectionPath), (snapshot) => setTeam(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
+        const unsubscribeTasks = onSnapshot(collection(db, tasksCollectionPath), (snapshot) => setAllTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))));
 
-        const unsubscribeTeam = onSnapshot(collection(db, teamCollectionPath), (snapshot) => {
-            setTeam(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-
-        return () => {
-            unsubscribeAuth();
-            unsubscribeTeam();
-        };
+        return () => { unsubscribeAuth(); unsubscribeTeam(); unsubscribeTasks(); };
     }, []);
 
     useEffect(() => {
-        if (!loggedInUser) return;
-        const q = query(collection(db, tasksCollectionPath), where('parentId', '==', currentView.parentId));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
-            setTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-        return () => unsubscribe();
-    }, [loggedInUser, currentView]);
+        // Recalculate dates whenever tasks change
+        const calculated = calculateDates(allTasks);
+        setProcessedTasks(calculated);
+    }, [allTasks]);
+
+
+    const navigateToTask = (task) => {
+        setBreadcrumbs(prev => [...prev, { id: task.id, title: task.title }]);
+        setCurrentView('kanban');
+    };
+
+    const navigateToBreadcrumb = (index) => {
+        setBreadcrumbs(prev => prev.slice(0, index + 1));
+        if (index === 0) setCurrentView('dashboard');
+    };
 
     const handleSaveTask = async (taskData) => {
         try {
             if (taskToEdit) {
-                const taskRef = doc(db, tasksCollectionPath, taskToEdit.id);
-                await updateDoc(taskRef, taskData);
+                await updateDoc(doc(db, tasksCollectionPath, taskToEdit.id), taskData);
             } else {
-                await addDoc(collection(db, tasksCollectionPath), { 
-                    ...taskData, 
-                    status: 'todo', 
-                    createdAt: Timestamp.now(), 
-                    assigneeId: null, 
-                    actualHours: 0,
-                    isLocked: taskData.dependencies?.length > 0 
-                });
+                await addDoc(collection(db, tasksCollectionPath), { ...taskData, status: 'todo', createdAt: Timestamp.now(), assigneeId: null, actualHours: 0, isLocked: taskData.dependencies?.length > 0, deleted: false });
             }
             closeTaskModal();
-        } catch (error) { 
-            console.error("Error al guardar tarea: ", error); 
-        }
+        } catch (error) { console.error("Error al guardar tarea: ", error); }
     };
 
     const handleTakeTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() });
     
     const handleLogHoursAndComplete = async (actualHours) => {
         if (!taskToLogHours) return;
-        const taskId = taskToLogHours.id;
-        const taskRef = doc(db, tasksCollectionPath, taskId);
-        await updateDoc(taskRef, { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
+        await updateDoc(doc(db, tasksCollectionPath, taskToLogHours.id), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
         setTaskToLogHours(null);
     };
     
@@ -116,28 +185,34 @@ export default function App() {
         else if (currentStatus === 'done') await updateDoc(taskRef, { status: 'inProgress', completedAt: null, startedAt: Timestamp.now(), actualHours: 0 });
     };
 
-    const openTaskModal = (task = null) => {
-        setTaskToEdit(task);
-        setIsTaskModalOpen(true);
+    const handleDeleteTask = async (taskId) => {
+        if (allTasks.some(t => t.parentId === taskId && !t.deleted)) {
+            alert("No se puede borrar una tarea con subtareas activas.");
+            return;
+        }
+        if (window.confirm("¿Estás seguro de que quieres borrar esta tarea? Podrás recuperarla más tarde.")) {
+            await updateDoc(doc(db, tasksCollectionPath, taskId), { deleted: true });
+        }
     };
 
-    const closeTaskModal = () => {
-        setTaskToEdit(null);
-        setIsTaskModalOpen(false);
-    };
+    const handleRestoreTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { deleted: false });
+    const handleAssignTask = async (taskId, userId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { assigneeId: userId });
+
+    const openTaskModal = (task = null) => { setTaskToEdit(task); setIsTaskModalOpen(true); };
+    const closeTaskModal = () => { setTaskToEdit(null); setIsTaskModalOpen(false); };
 
     const tasksByStatus = useMemo(() => ({
-        todo: tasks.filter(t => t.status === 'todo').sort((a,b) => (a.preferredDate?.seconds || Infinity) - (b.preferredDate?.seconds || Infinity)),
-        inProgress: tasks.filter(t => t.status === 'inProgress'),
-        done: tasks.filter(t => t.status === 'done'),
-    }), [tasks]);
+        todo: currentTasks.filter(t => t.status === 'todo').sort((a,b) => (a.preferredDate?.seconds || Infinity) - (b.preferredDate?.seconds || Infinity)),
+        inProgress: currentTasks.filter(t => t.status === 'inProgress'),
+        done: currentTasks.filter(t => t.status === 'done'),
+    }), [currentTasks]);
 
     if (isLoading) return <div className="w-full h-screen flex justify-center items-center bg-gray-50 dark:bg-gray-900"><Spinner /></div>;
     if (!loggedInUser) return <AuthScreen db={db} auth={auth} teamCollectionPath={teamCollectionPath} />;
     if (loggedInUser.role === 'pending') return (
         <div className="w-full h-screen flex flex-col justify-center items-center bg-gray-100 dark:bg-gray-900 text-center p-4">
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Cuenta Pendiente de Aprobación</h1>
-            <p className="text-gray-600 dark:text-gray-300 mb-6">Tu cuenta ha sido registrada. Un administrador necesita asignarte un rol para continuar.</p>
+            <p className="text-gray-600 dark:text-gray-300 mb-6">Un administrador necesita asignarte un rol para continuar.</p>
             <button onClick={() => signOut(auth)} className="px-4 py-2 bg-sky-500 text-white rounded-md hover:bg-sky-600">Cerrar Sesión</button>
         </div>
     );
@@ -154,19 +229,31 @@ export default function App() {
             </header>
             <main className="h-[calc(100vh-68px)] p-4 sm:p-6 lg:p-8">
                  <div className="flex justify-between items-center mb-6">
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white">
-                        {currentView.parentId ? 'Subtareas' : 'Proyectos'}
-                    </h1>
-                    {(loggedInUser.role === 'admin' || loggedInUser.role === 'superuser') && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentView.parentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
+                    <nav className="flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">
+                        {breadcrumbs.map((crumb, index) => (
+                            <React.Fragment key={crumb.id || 'root'}>
+                                {index > 0 && <ChevronRight className="w-4 h-4 mx-1" />}
+                                <button onClick={() => navigateToBreadcrumb(index)} className={`hover:text-sky-600 dark:hover:text-sky-400 ${index === breadcrumbs.length - 1 ? 'text-gray-800 dark:text-white font-semibold' : ''}`}>
+                                    {index === 0 ? <Home className="w-4 h-4 inline-block mr-1" /> : null} {crumb.title}
+                                </button>
+                            </React.Fragment>
+                        ))}
+                    </nav>
+                    {(loggedInUser.role === 'admin' || loggedInUser.role === 'superuser') && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
                 </div>
-                <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
-                    <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} allTasks={tasks} loggedInUser={loggedInUser} team={team} />
-                    <BoardColumn title="En Progreso" tasks={tasksByStatus.inProgress} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} allTasks={tasks} loggedInUser={loggedInUser} team={team} />
-                    <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} allTasks={tasks} loggedInUser={loggedInUser} team={team} />
-                </div>
+                
+                {currentView === 'dashboard' ? (
+                    <ProjectsDashboard allTasks={activeTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} loggedInUser={loggedInUser} />
+                ) : (
+                    <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
+                        <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
+                        <BoardColumn title="En Progreso" tasks={tasksByStatus.inProgress} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
+                        <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
+                    </div>
+                )}
             </main>
-            {isUserManagementOpen && <Modal onClose={() => setIsUserManagementOpen(false)}><UserManagement db={db} teamCollectionPath={teamCollectionPath} /></Modal>}
-            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onClose={closeTaskModal} existingTasks={tasks} taskToEdit={taskToEdit} parentId={currentView.parentId} /></Modal>}
+            {isUserManagementOpen && <Modal onClose={() => setIsUserManagementOpen(false)}><UserManagement db={db} allTasks={allTasks} onRestoreTask={handleRestoreTask} teamCollectionPath={teamCollectionPath} /></Modal>}
+            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
         </div>
     );

@@ -1,20 +1,30 @@
 import React, { useState, useEffect } from 'react';
-import { collection, query, onSnapshot, doc, updateDoc } from 'firebase/firestore';
-import { Users } from 'lucide-react';
+import { collection, query, onSnapshot, doc, updateDoc, where } from 'firebase/firestore';
+import { Users, Trash2, RotateCcw } from 'lucide-react';
 import Spinner from './Spinner';
 
-export default function UserManagement({ db, teamCollectionPath }) {
+export default function UserManagement({ db, teamCollectionPath, tasksCollectionPath, onRestoreTask }) {
     const [users, setUsers] = useState([]);
+    const [deletedTasks, setDeletedTasks] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
 
     useEffect(() => {
-        const q = query(collection(db, teamCollectionPath));
-        const unsubscribe = onSnapshot(q, (snapshot) => {
+        const qUsers = query(collection(db, teamCollectionPath));
+        const unsubscribeUsers = onSnapshot(qUsers, (snapshot) => {
             setUsers(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
             setIsLoading(false);
         });
-        return () => unsubscribe();
-    }, [db, teamCollectionPath]);
+
+        const qTasks = query(collection(db, tasksCollectionPath), where("deleted", "==", true));
+        const unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
+            setDeletedTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+
+        return () => {
+            unsubscribeUsers();
+            unsubscribeTasks();
+        };
+    }, [db, teamCollectionPath, tasksCollectionPath]);
 
     const handleRoleChange = async (userId, newRole) => {
         const userRef = doc(db, teamCollectionPath, userId);
@@ -49,6 +59,23 @@ export default function UserManagement({ db, teamCollectionPath }) {
                     ))}
                 </div>
             )}
+            <div className="mt-8 border-t pt-6 border-gray-300 dark:border-gray-600">
+                 <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 flex items-center"><Trash2 className="mr-3"/>Papelera de Tareas</h2>
+                 {deletedTasks.length === 0 ? (
+                     <p className="text-gray-500 dark:text-gray-400">No hay tareas borradas.</p>
+                 ) : (
+                     <div className="space-y-3">
+                         {deletedTasks.map(task => (
+                             <div key={task.id} className="flex justify-between items-center p-3 bg-gray-50 dark:bg-gray-700/50 rounded-md">
+                                 <p className="font-semibold">{task.title}</p>
+                                 <button onClick={() => onRestoreTask(task.id)} title="Restaurar Tarea" className="p-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 rounded-full hover:bg-green-100 dark:hover:bg-gray-700">
+                                     <RotateCcw className="w-4 h-4" />
+                                 </button>
+                             </div>
+                         ))}
+                     </div>
+                 )}
+            </div>
         </div>
     );
 };
