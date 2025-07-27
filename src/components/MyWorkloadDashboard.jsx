@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react';
 
 // --- Mis Componentes ---
@@ -146,7 +146,8 @@ export default function App() {
                     assigneeId: null, 
                     actualHours: 0,
                     isLocked: taskData.dependencies?.length > 0,
-                    deleted: false
+                    deleted: false,
+                    taskType: 'standard'
                 };
                 if (taskData.parentId === null) {
                     newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
@@ -164,11 +165,61 @@ export default function App() {
         } catch (error) { console.error("Error al guardar tarea: ", error); }
     };
 
+    const handleCreateLinkingRequest = async ({projectIdToLink, parentId}) => {
+        const projectToLink = allTasks.find(t => t.id === projectIdToLink);
+        if (!projectToLink) return;
+
+        const adminOfProjectToLink = projectToLink.team.find(m => m.role === 'admin');
+        if (!adminOfProjectToLink) return;
+
+        const requestTask = {
+            title: `Solicitud para vincular: "${projectToLink.title}"`,
+            description: `El administrador de "${breadcrumbs[breadcrumbs.length-1].title}" quiere vincular este proyecto como una subtarea. Al completar esta tarea, le darás acceso.`,
+            parentId: parentId,
+            status: 'todo',
+            assigneeId: adminOfProjectToLink.userId,
+            createdAt: Timestamp.now(),
+            deleted: false,
+            taskType: 'linkingRequest',
+            linkingData: {
+                projectIdToLink: projectIdToLink,
+                requesterId: loggedInUser.uid,
+                originalParentId: parentId
+            }
+        };
+        await addDoc(collection(db, tasksCollectionPath), requestTask);
+        closeTaskModal();
+    };
+
     const handleTakeTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() });
     
     const handleLogHoursAndComplete = async (actualHours) => {
         if (!taskToLogHours) return;
-        await updateDoc(doc(db, tasksCollectionPath, taskToLogHours.id), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
+        const taskRef = doc(db, tasksCollectionPath, taskToLogHours.id);
+
+        // Check if it's a linking request
+        if (taskToLogHours.taskType === 'linkingRequest') {
+            const { projectIdToLink, requesterId, originalParentId } = taskToLogHours.linkingData;
+            const projectToLinkRef = doc(db, tasksCollectionPath, projectIdToLink);
+            
+            // Add requester to the team of the linked project
+            await updateDoc(projectToLinkRef, {
+                team: arrayUnion({ userId: requesterId, role: 'member' }),
+                memberIds: arrayUnion(requesterId)
+            });
+
+            // Replace the request task with the actual linked task
+            await updateDoc(taskRef, {
+                title: `VINCULADO: ${taskToLogHours.title.replace('Solicitud para vincular: ', '')}`,
+                description: `Este es un enlace al proyecto. Haz clic en 'Abrir Tablero' para ver sus detalles.`,
+                taskType: 'linkedProject',
+                status: 'done',
+                linkedProjectId: projectIdToLink
+            });
+
+        } else {
+            await updateDoc(taskRef, { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
+        }
         setTaskToLogHours(null);
     };
     
@@ -243,7 +294,7 @@ export default function App() {
 
             </main>
             {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} /></Modal>}
-            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} /></Modal>}
+            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
         </div>
     );
