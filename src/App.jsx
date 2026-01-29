@@ -1,13 +1,13 @@
-"""
-Synaptic Flow - Sistema de Gestión de Proyectos y Tickets
-
-Aplicación web para gestión de proyectos de investigación con sistema
-de tickets tipo Kanban, desarrollada con React, Vite y Firebase.
-
-@author: Desarrollo
-@version: 1.0.0
-@license: MIT
-"""
+/**
+ * Synaptic Flow - Sistema de Gestión de Proyectos y Tickets
+ * 
+ * Aplicación web para gestión de proyectos de investigación con sistema
+ * de tickets tipo Kanban, desarrollada con React, Vite y Firebase.
+ * 
+ * @author: Desarrollo
+ * @version: 1.0.0
+ * @license: MIT
+ */
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
