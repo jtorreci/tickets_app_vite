@@ -1,6 +1,37 @@
+"""
+Tarjeta de tarea para Synaptic Flow.
+
+Muestra información detallada de una tarea incluyendo:
+- Título y descripción
+- Fechas y horas estimadas/reales
+- Estado de bloqueo por dependencias
+- Asignatario y acciones disponibles
+
+@module TaskCard
+@component
+"""
+
 import React, { useMemo } from 'react';
 import { Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, RotateCcw, Undo2, AlertCircle, TrendingUp, TrendingDown, ExternalLink, Trash2, Hourglass, Link } from 'lucide-react';
 
+/**
+ * Tarjeta de tarea para el tablero Kanban.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Object} props.task - Objeto tarea a mostrar.
+ * @param {Function} props.onTake - Función para tomar la tarea.
+ * @param {Function} props.onComplete - Función para completar.
+ * @param {Function} props.onRevert - Función para revertir.
+ * @param {Function} props.onEdit - Función para editar.
+ * @param {Function} props.onNavigate - Función para navegar a subtareas.
+ * @param {Function} props.onAssign - Función para asignar.
+ * @param {Function} props.onDelete - Función para borrar.
+ * @param {boolean} props.isLocked - Si la tarea está bloqueada.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Array} props.team - Lista de miembros.
+ * @param {Array} props.allTasks - Todas las tareas.
+ * @returns {JSX.Element} Tarjeta de tarea.
+ */
 export default function TaskCard({ task, onTake, onComplete, onRevert, onEdit, onNavigate, onAssign, onDelete, isLocked, loggedInUser, team, allTasks }) {
     const assignee = task.assigneeId ? team.find(m => m.id === task.assigneeId) : null;
     const assigneeName = assignee ? assignee.username : 'Sin asignar';

@@ -1,8 +1,27 @@
+"""
+Pantalla de autenticación para Synaptic Flow.
+
+Maneja el inicio de sesión y registro de usuarios mediante Firebase Auth.
+Los nuevos usuarios se crean con rol 'pending' esperando aprobación.
+
+@module AuthScreen
+@component
+"""
+
 import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
 import { setDoc, doc } from 'firebase/firestore';
 import Spinner from './Spinner';
 
+/**
+ * Pantalla de autenticación con opciones de login y registro.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Object} props.db - Instancia de Firestore.
+ * @param {Object} props.auth - Instancia de Firebase Auth.
+ * @param {string} props.teamCollectionPath - Ruta de la colección de miembros.
+ * @returns {JSX.Element} Componente de autenticación.
+ */
 export default function AuthScreen({ db, auth, teamCollectionPath }) {
     const [isLogin, setIsLogin] = useState(true);
     const [email, setEmail] = useState('');

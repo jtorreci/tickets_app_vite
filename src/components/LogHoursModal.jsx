@@ -1,6 +1,24 @@
+"""
+Modal de registro de horas para Synaptic Flow.
+
+Permite registrar las horas reales dedicadas al completar una tarea.
+
+@module LogHoursModal
+@component
+"""
+
 import React, { useState } from 'react';
 import { Check } from 'lucide-react';
 
+/**
+ * Modal para registrar horas al completar una tarea.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Function} props.onSave - Función para guardar horas.
+ * @param {Function} props.onCancel - Función para cancelar.
+ * @param {Object} props.task - Tarea a completar.
+ * @returns {JSX.Element} Modal de registro de horas.
+ */
 export default function LogHoursModal({ onSave, onCancel, task }) {
     const [actualHours, setActualHours] = useState('');
 

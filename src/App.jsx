@@ -1,10 +1,21 @@
+"""
+Synaptic Flow - Sistema de Gestión de Proyectos y Tickets
+
+Aplicación web para gestión de proyectos de investigación con sistema
+de tickets tipo Kanban, desarrollada con React, Vite y Firebase.
+
+@author: Desarrollo
+@version: 1.0.0
+@license: MIT
+"""
+
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc } from 'firebase/firestore';
+import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion, writeBatch } from 'firebase/firestore';
 import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react';
 
-// --- Mis Componentes ---
+// --- Componentes de la aplicación ---
 import AuthScreen from './components/AuthScreen';
 import BoardColumn from './components/BoardColumn';
 import Modal from './components/Modal';
@@ -31,30 +42,33 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const auth = getAuth(app);
 
-// --- Rutas de Firestore ---
+// --- Rutas de colecciones en Firestore ---
 const tasksCollectionPath = `tasks`;
 const teamCollectionPath = `team_members`;
+const messagesCollectionPath = `messages`;
+
 
 export default function App() {
     const [loggedInUser, setLoggedInUser] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [team, setTeam] = useState([]);
-    const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
     const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
     const [taskToEdit, setTaskToEdit] = useState(null);
     const [taskToLogHours, setTaskToLogHours] = useState(null);
     const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
     const [projectToManage, setProjectToManage] = useState(null);
+    const [messages, setMessages] = useState([]);
     
     const [allTasks, setAllTasks] = useState([]);
-    const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'kanban', 'my-workload'
+    const [currentView, setCurrentView] = useState('dashboard');
     const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, title: 'Proyectos' }]);
 
     const currentParentId = breadcrumbs[breadcrumbs.length - 1].id;
     
     const activeTasks = useMemo(() => allTasks.filter(task => !task.deleted), [allTasks]);
     const currentTasks = useMemo(() => activeTasks.filter(task => task.parentId === currentParentId), [activeTasks, currentParentId]);
-    const userProjects = useMemo(() => activeTasks.filter(task => task.parentId === null), [activeTasks]);
+    // ¡CORREGIDO! Un proyecto es una tarea con isProject = true
+    const userProjects = useMemo(() => activeTasks.filter(task => task.isProject), [activeTasks]);
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
@@ -75,12 +89,18 @@ export default function App() {
     useEffect(() => {
         if (!loggedInUser) {
             setAllTasks([]);
+            setMessages([]);
             return;
         };
 
-        const q = query(collection(db, tasksCollectionPath), where('memberIds', 'array-contains', loggedInUser.uid));
-        const unsubscribeTasks = onSnapshot(q, (snapshot) => {
+        const qTasks = query(collection(db, tasksCollectionPath), where('memberIds', 'array-contains', loggedInUser.uid));
+        const unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
             setAllTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+        });
+
+        const qMessages = query(collection(db, messagesCollectionPath), where('recipientId', '==', loggedInUser.uid));
+        const unsubscribeMessages = onSnapshot(qMessages, (snapshot) => {
+            setMessages(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
         const unsubscribeTeam = onSnapshot(collection(db, teamCollectionPath), (snapshot) => {
@@ -90,21 +110,34 @@ export default function App() {
         return () => {
             unsubscribeTasks();
             unsubscribeTeam();
+            unsubscribeMessages();
         };
     }, [loggedInUser]);
 
+    /**
+     * Calcula las horas agregadas de una tarea incluyendo todas sus subtareas.
+     * Utiliza recursión para sumar horas de toda la jerarquía.
+     *
+     * @param {string} taskId - ID de la tarea padre.
+     * @param {Array} tasks - Lista completa de tareas.
+     * @returns {number} Total de horas estimadas.
+     */
     const getAggregatedHours = useCallback((taskId, tasks) => {
         const tasksMap = new Map(tasks.map(t => [t.id, t]));
         const children = tasks.filter(t => t.parentId === taskId);
         const selfHours = tasksMap.get(taskId)?.expectedHours || 0;
-        
-        const childrenHours = children.reduce((sum, child) => {
-            return sum + getAggregatedHours(child.id, tasks);
-        }, 0);
 
+        const childrenHours = children.reduce((sum, child) => sum + getAggregatedHours(child.id, tasks), 0);
         return selfHours + childrenHours;
     }, []);
 
+    /**
+     * Genera la ruta de navegación (breadcrumbs) desde Proyectos hasta la tarea.
+     *
+     * @param {string} taskId - ID de la tarea destino.
+     * @param {Array} tasks - Lista completa de tareas.
+     * @returns {Array} Lista de objetos {id, title}.
+     */
     const findTaskBreadcrumbs = (taskId, tasks) => {
         const tasksMap = new Map(tasks.map(t => [t.id, t]));
         let crumbs = [];
@@ -116,68 +149,193 @@ export default function App() {
         return [{ id: null, title: 'Proyectos' }, ...crumbs];
     };
 
+    /**
+     * Navega a una tarea específica actualizando breadcrumbs y vista.
+     *
+     * @param {Object} task - Objeto tarea a navegar.
+     */
     const navigateToTask = (task) => {
         const newBreadcrumbs = findTaskBreadcrumbs(task.id, allTasks);
         setBreadcrumbs(newBreadcrumbs);
         setCurrentView('kanban');
     };
 
+    /**
+     * Navega a un nivel específico del breadcrumb.
+     *
+     * @param {number} index - Índice del breadcrumb a navegar.
+     */
     const navigateToBreadcrumb = (index) => {
         setBreadcrumbs(prev => prev.slice(0, index + 1));
-        if (index === 0) {
-            setCurrentView('dashboard');
-        }
+        if (index === 0) setCurrentView('dashboard');
     };
-    
+
+    /**
+     * Navega de vuelta al dashboard de proyectos.
+     */
     const navigateToDashboard = () => {
         setBreadcrumbs([{ id: null, title: 'Proyectos' }]);
         setCurrentView('dashboard');
     }
 
+    /**
+     * Guarda una nueva tarea o actualiza una existente.
+     *
+     * @param {Object} taskData - Datos de la tarea a guardar.
+     */
     const handleSaveTask = async (taskData) => {
         try {
             if (taskToEdit) {
                 await updateDoc(doc(db, tasksCollectionPath, taskToEdit.id), taskData);
             } else {
-                const newTask = { 
-                    ...taskData, 
-                    status: 'todo', 
-                    createdAt: Timestamp.now(), 
-                    assigneeId: null, 
-                    actualHours: 0,
-                    isLocked: taskData.dependencies?.length > 0,
-                    deleted: false
-                };
+                const parentTask = allTasks.find(t => t.id === taskData.parentId);
+                const projectId = parentTask ? parentTask.projectId : null;
+
+                const newTask = { ...taskData, status: 'todo', createdAt: Timestamp.now(), assigneeId: null, actualHours: 0, isLocked: taskData.dependencies?.length > 0, deleted: false, taskType: 'standard' };
+                
                 if (taskData.parentId === null) {
                     newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
                     newTask.memberIds = [loggedInUser.uid];
+                    const docRef = await addDoc(collection(db, tasksCollectionPath), newTask);
+                    await updateDoc(docRef, { projectId: docRef.id });
                 } else {
-                    const parentTask = allTasks.find(t => t.id === taskData.parentId);
-                    if(parentTask) {
-                        newTask.team = parentTask.team;
-                        newTask.memberIds = parentTask.memberIds;
-                    }
+                    newTask.isProject = false; // Subtareas nunca son proyectos
+                    newTask.team = parentTask.team;
+                    newTask.memberIds = parentTask.memberIds;
+                    newTask.projectId = parentTask.projectId;
+                    await addDoc(collection(db, tasksCollectionPath), newTask);
                 }
-                await addDoc(collection(db, tasksCollectionPath), newTask);
             }
             closeTaskModal();
         } catch (error) { console.error("Error al guardar tarea: ", error); }
     };
 
+    /**
+     * Crea una solicitud para vincular un proyecto existente como subtarea.
+     * Envía un mensaje al admin del proyecto a vincular.
+     *
+     * @param {Object} params - Parámetros de la solicitud.
+     * @param {string} params.projectIdToLink - ID del proyecto a vincular.
+     * @param {string} params.parentId - ID del proyecto padre.
+     */
+    const handleCreateLinkingRequest = async ({projectIdToLink, parentId}) => {
+        try {
+            const projectToLink = allTasks.find(t => t.id === projectIdToLink);
+            const parentProject = allTasks.find(t => t.id === parentId);
+            if (!projectToLink || !parentProject) {
+                alert("Error: No se pudo encontrar el proyecto."); return;
+            }
+            const adminOfProjectToLink = projectToLink.team.find(m => m.role === 'admin');
+            if (!adminOfProjectToLink) {
+                alert(`Error: El proyecto "${projectToLink.title}" no tiene un administrador.`); return;
+            }
+            const requestMessage = {
+                type: 'linkingRequest',
+                senderId: loggedInUser.uid,
+                senderName: loggedInUser.username,
+                recipientId: adminOfProjectToLink.userId,
+                data: {
+                    projectToLinkName: projectToLink.title,
+                    projectToLinkId: projectToLink.id,
+                    parentProjectName: parentProject.title,
+                    parentProjectId: parentProject.id,
+                },
+                createdAt: Timestamp.now()
+            };
+            await addDoc(collection(db, messagesCollectionPath), requestMessage);
+            closeTaskModal();
+        } catch (error) { console.error("Error creating linking request:", error); }
+    };
+
+    /**
+     * Aprueba una solicitud de vinculación de proyecto.
+     * Añade al solicitante como miembro y crea un enlace en el proyecto padre.
+     *
+     * @param {Object} message - Mensaje de solicitud de vinculación.
+     */
+    const handleApproveLinkingRequest = async (message) => {
+        const { projectToLinkId, parentProjectId, senderId } = message.data;
+        const projectToLinkRef = doc(db, tasksCollectionPath, projectToLinkId);
+        const parentProject = allTasks.find(t => t.id === parentProjectId);
+        const projectToLink = allTasks.find(t => t.id === projectToLinkId);
+
+        if (!parentProject || !projectToLink) {
+            alert("Error: Uno de los proyectos ya no existe.");
+            await deleteDoc(doc(db, messagesCollectionPath, message.id));
+            return;
+        }
+
+        await updateDoc(projectToLinkRef, {
+            team: arrayUnion({ userId: senderId, role: 'member' }),
+            memberIds: arrayUnion(senderId)
+        });
+
+        await addDoc(collection(db, tasksCollectionPath), {
+            title: `VINCULADO: ${projectToLink.title}`,
+            description: `Este es un enlace al proyecto. Haz clic en 'Abrir Tablero' para ver sus detalles.`,
+            parentId: parentProjectId,
+            projectId: parentProject.projectId,
+            status: 'done',
+            taskType: 'linkedProject',
+            linkedProjectId: projectToLinkId,
+            createdAt: Timestamp.now(),
+            deleted: false,
+            team: parentProject.team,
+            memberIds: parentProject.memberIds
+        });
+
+        await deleteDoc(doc(db, messagesCollectionPath, message.id));
+    };
+
+    /**
+     * Rechaza una solicitud de vinculación eliminando el mensaje.
+     *
+     * @param {string} messageId - ID del mensaje a rechazar.
+     */
+    const handleDeclineLinkingRequest = async (messageId) => {
+        await deleteDoc(doc(db, messagesCollectionPath, messageId));
+    };
+
+    /**
+     * Asigna una tarea al usuario actual y cambia estado a 'En Progreso'.
+     *
+     * @param {string} taskId - ID de la tarea a tomar.
+     */
     const handleTakeTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() });
-    
+
+    /**
+     * Registra horas trabajadas y marca la tarea como completada.
+     *
+     * @param {number} actualHours - Horas reales dedicadas.
+     */
     const handleLogHoursAndComplete = async (actualHours) => {
         if (!taskToLogHours) return;
-        await updateDoc(doc(db, tasksCollectionPath, taskToLogHours.id), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
-        setTaskToLogHours(null);
+        try {
+            await updateDoc(doc(db, tasksCollectionPath, taskToLogHours.id), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
+        } catch (error) {
+            console.error("Error al completar la tarea:", error);
+        } finally {
+            setTaskToLogHours(null);
+        }
     };
     
+    /**
+     * Revierte el estado de una tarea al estado anterior.
+     *
+     * @param {string} taskId - ID de la tarea.
+     * @param {string} currentStatus - Estado actual de la tarea.
+     */
     const handleRevertTask = async (taskId, currentStatus) => {
         const taskRef = doc(db, tasksCollectionPath, taskId);
         if (currentStatus === 'inProgress') await updateDoc(taskRef, { status: 'todo', assigneeId: null, startedAt: null });
         else if (currentStatus === 'done') await updateDoc(taskRef, { status: 'inProgress', completedAt: null, startedAt: Timestamp.now(), actualHours: 0 });
     };
 
+    /**
+     * Borra una tarea (soft delete) si no tiene subtareas activas.
+     *
+     * @param {string} taskId - ID de la tarea a borrar.
+     */
     const handleDeleteTask = async (taskId) => {
         if (allTasks.some(t => t.parentId === taskId && !t.deleted)) {
             alert("No se puede borrar una tarea con subtareas activas.");
@@ -188,14 +346,39 @@ export default function App() {
         }
     };
 
+    /**
+     * Asigna una tarea a un usuario específico.
+     *
+     * @param {string} taskId - ID de la tarea.
+     * @param {string} userId - ID del usuario asignado.
+     */
     const handleAssignTask = async (taskId, userId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { assigneeId: userId });
-    
+
+    /**
+     * Abre el modal para crear/editar una tarea.
+     *
+     * @param {Object} task - Tarea a editar (null para nueva).
+     */
     const openTaskModal = (task = null) => { setTaskToEdit(task); setIsTaskModalOpen(true); };
+
+    /** Cierra el modal de tareas. */
     const closeTaskModal = () => { setTaskToEdit(null); setIsTaskModalOpen(false); };
-    
+
+    /**
+     * Abre el modal de gestión de equipo.
+     *
+     * @param {Object} project - Proyecto a gestionar.
+     */
     const openTeamModal = (project) => { setProjectToManage(project); setIsTeamModalOpen(true); };
+
+    /** Cierra el modal de equipo. */
     const closeTeamModal = () => { setProjectToManage(null); setIsTeamModalOpen(false); };
 
+    /**
+     * Filtra las tareas por estado para las columnas Kanban.
+     *
+     * @type {Object}
+     */
     const tasksByStatus = useMemo(() => ({
         todo: currentTasks.filter(t => t.status === 'todo').sort((a,b) => (a.preferredDate?.seconds || Infinity) - (b.preferredDate?.seconds || Infinity)),
         inProgress: currentTasks.filter(t => t.status === 'inProgress'),
@@ -211,7 +394,10 @@ export default function App() {
                 <div className="font-bold text-xl text-sky-600 dark:text-sky-400">Synaptic Flow</div>
                 <div className="flex items-center space-x-4">
                     <button onClick={navigateToDashboard} title="Ver Proyectos" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Home className="w-5 h-5"/></button>
-                    <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Briefcase className="w-5 h-5"/></button>
+                    <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 relative">
+                        <Briefcase className="w-5 h-5"/>
+                        {messages.length > 0 && <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>}
+                    </button>
                     <span className="text-sm text-gray-600 dark:text-gray-300">Hola, <span className="font-bold">{loggedInUser.username}</span>!</span>
                     <button onClick={() => signOut(auth)} title="Cerrar Sesión" className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><LogOut className="w-5 h-5"/></button>
                 </div>
@@ -239,11 +425,11 @@ export default function App() {
                         <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
                     </div>
                 )}
-                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} />}
+                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
 
             </main>
             {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} /></Modal>}
-            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} /></Modal>}
+            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
         </div>
     );

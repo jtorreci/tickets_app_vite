@@ -1,301 +1,165 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { initializeApp } from 'firebase/app';
-import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion } from 'firebase/firestore';
-import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react';
+"""
+Dashboard de carga de trabajo personal para Synaptic Flow.
 
-// --- Mis Componentes ---
-import AuthScreen from './components/AuthScreen';
-import BoardColumn from './components/BoardColumn';
-import Modal from './components/Modal';
-import Spinner from './components/Spinner';
-import TaskForm from './components/TaskForm';
-import LogHoursModal from './components/LogHoursModal';
-import UserManagement from './components/UserManagement';
-import ProjectsDashboard from './components/ProjectsDashboard';
-import TeamManagement from './components/TeamManagement';
-import MyWorkloadDashboard from './components/MyWorkloadDashboard';
+Muestra las tareas asignadas al usuario con sus horas
+estimadas y permite gestión rápida.
 
-// --- Lee la configuración de Firebase desde las variables de entorno ---
-const firebaseConfig = {
-    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
-    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
-    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
-    appId: import.meta.env.VITE_FIREBASE_APP_ID
-};
+@module MyWorkloadDashboard
+@component
+"""
 
-// --- Inicialización de servicios ---
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const auth = getAuth(app);
+import React, { useMemo, useState } from 'react';
+import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown } from 'lucide-react';
 
-// --- Rutas de Firestore ---
-const tasksCollectionPath = `tasks`;
-const teamCollectionPath = `team_members`;
-
-export default function App() {
-    const [loggedInUser, setLoggedInUser] = useState(null);
-    const [isLoading, setIsLoading] = useState(true);
-    const [team, setTeam] = useState([]);
-    const [isUserManagementOpen, setIsUserManagementOpen] = useState(false);
-    const [isTaskModalOpen, setIsTaskModalOpen] = useState(false);
-    const [taskToEdit, setTaskToEdit] = useState(null);
-    const [taskToLogHours, setTaskToLogHours] = useState(null);
-    const [isTeamModalOpen, setIsTeamModalOpen] = useState(false);
-    const [projectToManage, setProjectToManage] = useState(null);
+/**
+ * Item de tarea en el dashboard de carga de trabajo.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Object} props.task - Tarea a mostrar.
+ * @param {Array} props.allTasks - Todas las tareas.
+ * @param {Function} props.getAggregatedHours - Función para calcular horas.
+ * @param {number} props.level - Nivel de anidamiento.
+ * @param {Function} props.onNavigate - Función de navegación.
+ * @param {Function} props.onTake - Función para tomar tarea.
+ * @param {Function} props.onComplete - Función para completar.
+ * @param {Function} props.onRevert - Función para revertir.
+ * @param {Function} props.onEdit - Función para editar.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Array} props.team - Lista de miembros.
+ * @returns {JSX.Element} Item de tarea.
+ */
+const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNavigate, onTake, onComplete, onRevert, onEdit, loggedInUser, team }) => {
+    const [isExpanded, setIsExpanded] = useState(false);
+    const children = useMemo(() => allTasks.filter(t => t.parentId === task.id && t.assigneeId === loggedInUser.uid), [allTasks, task.id, loggedInUser.uid]);
+    const aggregatedHours = useMemo(() => getAggregatedHours(task.id, allTasks), [task.id, allTasks, getAggregatedHours]);
+    const hasChildren = children.length > 0;
     
-    const [allTasks, setAllTasks] = useState([]);
-    const [currentView, setCurrentView] = useState('dashboard'); // 'dashboard', 'kanban', 'my-workload'
-    const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, title: 'Proyectos' }]);
-
-    const currentParentId = breadcrumbs[breadcrumbs.length - 1].id;
-    
-    const activeTasks = useMemo(() => allTasks.filter(task => !task.deleted), [allTasks]);
-    const currentTasks = useMemo(() => activeTasks.filter(task => task.parentId === currentParentId), [activeTasks, currentParentId]);
-    const userProjects = useMemo(() => activeTasks.filter(task => task.parentId === null), [activeTasks]);
-
-    useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
-            if (user) {
-                const userDocRef = doc(db, teamCollectionPath, user.uid);
-                onSnapshot(userDocRef, (docSnap) => {
-                    if (docSnap.exists()) setLoggedInUser({ uid: user.uid, ...docSnap.data() });
-                    setIsLoading(false);
-                });
-            } else {
-                setLoggedInUser(null);
-                setIsLoading(false);
-            }
-        });
-        return () => unsubscribeAuth();
-    }, []);
-    
-    useEffect(() => {
-        if (!loggedInUser) {
-            setAllTasks([]);
-            return;
-        };
-
-        const q = query(collection(db, tasksCollectionPath), where('memberIds', 'array-contains', loggedInUser.uid));
-        const unsubscribeTasks = onSnapshot(q, (snapshot) => {
-            setAllTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-
-        const unsubscribeTeam = onSnapshot(collection(db, teamCollectionPath), (snapshot) => {
-            setTeam(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
-        });
-
-        return () => {
-            unsubscribeTasks();
-            unsubscribeTeam();
-        };
-    }, [loggedInUser]);
-
-    const getAggregatedHours = useCallback((taskId, tasks) => {
-        const tasksMap = new Map(tasks.map(t => [t.id, t]));
-        const children = tasks.filter(t => t.parentId === taskId);
-        const selfHours = tasksMap.get(taskId)?.expectedHours || 0;
-        
-        const childrenHours = children.reduce((sum, child) => {
-            return sum + getAggregatedHours(child.id, tasks);
-        }, 0);
-
-        return selfHours + childrenHours;
-    }, []);
+    const formatDate = (timestamp) => timestamp ? new Date(timestamp.seconds * 1000).toLocaleDateString() : 'N/A';
+    const isAdmin = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
 
     const findTaskBreadcrumbs = (taskId, tasks) => {
         const tasksMap = new Map(tasks.map(t => [t.id, t]));
         let crumbs = [];
         let current = tasksMap.get(taskId);
         while (current) {
-            crumbs.unshift({ id: current.id, title: current.title });
+            crumbs.unshift(current);
             current = tasksMap.get(current.parentId);
         }
-        return [{ id: null, title: 'Proyectos' }, ...crumbs];
+        return crumbs;
     };
 
-    const navigateToTask = (task) => {
-        const newBreadcrumbs = findTaskBreadcrumbs(task.id, allTasks);
-        setBreadcrumbs(newBreadcrumbs);
-        setCurrentView('kanban');
-    };
+    const breadcrumbs = useMemo(() => findTaskBreadcrumbs(task.id, allTasks), [task.id, allTasks]);
 
-    const navigateToBreadcrumb = (index) => {
-        setBreadcrumbs(prev => prev.slice(0, index + 1));
-        if (index === 0) {
-            setCurrentView('dashboard');
-        }
-    };
-    
-    const navigateToDashboard = () => {
-        setBreadcrumbs([{ id: null, title: 'Proyectos' }]);
-        setCurrentView('dashboard');
-    }
-
-    const handleSaveTask = async (taskData) => {
-        try {
-            if (taskToEdit) {
-                await updateDoc(doc(db, tasksCollectionPath, taskToEdit.id), taskData);
-            } else {
-                const newTask = { 
-                    ...taskData, 
-                    status: 'todo', 
-                    createdAt: Timestamp.now(), 
-                    assigneeId: null, 
-                    actualHours: 0,
-                    isLocked: taskData.dependencies?.length > 0,
-                    deleted: false,
-                    taskType: 'standard'
-                };
-                if (taskData.parentId === null) {
-                    newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
-                    newTask.memberIds = [loggedInUser.uid];
-                } else {
-                    const parentTask = allTasks.find(t => t.id === taskData.parentId);
-                    if(parentTask) {
-                        newTask.team = parentTask.team;
-                        newTask.memberIds = parentTask.memberIds;
-                    }
-                }
-                await addDoc(collection(db, tasksCollectionPath), newTask);
-            }
-            closeTaskModal();
-        } catch (error) { console.error("Error al guardar tarea: ", error); }
-    };
-
-    const handleCreateLinkingRequest = async ({projectIdToLink, parentId}) => {
-        const projectToLink = allTasks.find(t => t.id === projectIdToLink);
-        if (!projectToLink) return;
-
-        const adminOfProjectToLink = projectToLink.team.find(m => m.role === 'admin');
-        if (!adminOfProjectToLink) return;
-
-        const requestTask = {
-            title: `Solicitud para vincular: "${projectToLink.title}"`,
-            description: `El administrador de "${breadcrumbs[breadcrumbs.length-1].title}" quiere vincular este proyecto como una subtarea. Al completar esta tarea, le darás acceso.`,
-            parentId: parentId,
-            status: 'todo',
-            assigneeId: adminOfProjectToLink.userId,
-            createdAt: Timestamp.now(),
-            deleted: false,
-            taskType: 'linkingRequest',
-            linkingData: {
-                projectIdToLink: projectIdToLink,
-                requesterId: loggedInUser.uid,
-                originalParentId: parentId
-            }
-        };
-        await addDoc(collection(db, tasksCollectionPath), requestTask);
-        closeTaskModal();
-    };
-
-    const handleTakeTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() });
-    
-    const handleLogHoursAndComplete = async (actualHours) => {
-        if (!taskToLogHours) return;
-        const taskRef = doc(db, tasksCollectionPath, taskToLogHours.id);
-
-        // Check if it's a linking request
-        if (taskToLogHours.taskType === 'linkingRequest') {
-            const { projectIdToLink, requesterId, originalParentId } = taskToLogHours.linkingData;
-            const projectToLinkRef = doc(db, tasksCollectionPath, projectIdToLink);
-            
-            // Add requester to the team of the linked project
-            await updateDoc(projectToLinkRef, {
-                team: arrayUnion({ userId: requesterId, role: 'member' }),
-                memberIds: arrayUnion(requesterId)
-            });
-
-            // Replace the request task with the actual linked task
-            await updateDoc(taskRef, {
-                title: `VINCULADO: ${taskToLogHours.title.replace('Solicitud para vincular: ', '')}`,
-                description: `Este es un enlace al proyecto. Haz clic en 'Abrir Tablero' para ver sus detalles.`,
-                taskType: 'linkedProject',
-                status: 'done',
-                linkedProjectId: projectIdToLink
-            });
-
-        } else {
-            await updateDoc(taskRef, { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
-        }
-        setTaskToLogHours(null);
-    };
-    
-    const handleRevertTask = async (taskId, currentStatus) => {
-        const taskRef = doc(db, tasksCollectionPath, taskId);
-        if (currentStatus === 'inProgress') await updateDoc(taskRef, { status: 'todo', assigneeId: null, startedAt: null });
-        else if (currentStatus === 'done') await updateDoc(taskRef, { status: 'inProgress', completedAt: null, startedAt: Timestamp.now(), actualHours: 0 });
-    };
-
-    const handleDeleteTask = async (taskId) => {
-        if (allTasks.some(t => t.parentId === taskId && !t.deleted)) {
-            alert("No se puede borrar una tarea con subtareas activas.");
-            return;
-        }
-        if (window.confirm("¿Estás seguro de que quieres borrar esta tarea?")) {
-            await updateDoc(doc(db, tasksCollectionPath, taskId), { deleted: true });
-        }
-    };
-
-    const handleAssignTask = async (taskId, userId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { assigneeId: userId });
-    
-    const openTaskModal = (task = null) => { setTaskToEdit(task); setIsTaskModalOpen(true); };
-    const closeTaskModal = () => { setTaskToEdit(null); setIsTaskModalOpen(false); };
-    
-    const openTeamModal = (project) => { setProjectToManage(project); setIsTeamModalOpen(true); };
-    const closeTeamModal = () => { setProjectToManage(null); setIsTeamModalOpen(false); };
-
-    const tasksByStatus = useMemo(() => ({
-        todo: currentTasks.filter(t => t.status === 'todo').sort((a,b) => (a.preferredDate?.seconds || Infinity) - (b.preferredDate?.seconds || Infinity)),
-        inProgress: currentTasks.filter(t => t.status === 'inProgress'),
-        done: currentTasks.filter(t => t.status === 'done'),
-    }), [currentTasks]);
-
-    if (isLoading) return <div className="w-full h-screen flex justify-center items-center bg-gray-50 dark:bg-gray-900"><Spinner /></div>;
-    if (!loggedInUser) return <AuthScreen db={db} auth={auth} teamCollectionPath={teamCollectionPath} />;
-    
     return (
-        <div className="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 min-h-screen font-sans">
-            <header className="bg-white dark:bg-gray-800 shadow-sm p-4 flex justify-between items-center">
-                <div className="font-bold text-xl text-sky-600 dark:text-sky-400">Synaptic Flow</div>
-                <div className="flex items-center space-x-4">
-                    <button onClick={navigateToDashboard} title="Ver Proyectos" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Home className="w-5 h-5"/></button>
-                    <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Briefcase className="w-5 h-5"/></button>
-                    <span className="text-sm text-gray-600 dark:text-gray-300">Hola, <span className="font-bold">{loggedInUser.username}</span>!</span>
-                    <button onClick={() => signOut(auth)} title="Cerrar Sesión" className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><LogOut className="w-5 h-5"/></button>
-                </div>
-            </header>
-            <main className="h-[calc(100vh-68px)] p-4 sm:p-6 lg:p-8">
-                 <div className="flex justify-between items-center mb-6">
-                    <nav className="flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">
-                        {currentView === 'kanban' && breadcrumbs.map((crumb, index) => (
-                            <React.Fragment key={crumb.id || 'root'}>
-                                {index > 0 && <ChevronRight className="w-4 h-4 mx-1" />}
-                                <button onClick={() => navigateToBreadcrumb(index)} className={`hover:text-sky-600 dark:hover:text-sky-400 ${index === breadcrumbs.length - 1 ? 'text-gray-800 dark:text-white font-semibold' : ''}`}>
-                                    {index === 0 ? <Home className="w-4 h-4 inline-block mr-1" /> : null} {crumb.title}
+        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700" style={{ marginLeft: `${level * 1}rem` }}>
+            <div className="p-3 flex items-center">
+                <div className="flex-grow">
+                    <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mb-2 flex-wrap">
+                        {breadcrumbs.map((crumb, index) => (
+                            <React.Fragment key={crumb.id}>
+                                {index > 0 && <ChevronRight className="w-4 h-4 mx-1 flex-shrink-0" />}
+                                <button onClick={() => onNavigate(crumb)} className="hover:underline hover:text-sky-500 text-left">
+                                    {crumb.title}
                                 </button>
                             </React.Fragment>
                         ))}
-                    </nav>
-                    {currentView !== 'my-workload' && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
+                    </div>
+                    <p className="font-semibold text-gray-900 dark:text-white">{task.title}</p>
+                    <div className="mt-2 flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
+                        <span className={`px-2 py-1 rounded-full text-white ${task.status === 'inProgress' ? 'bg-sky-500' : 'bg-gray-400'}`}>
+                            {task.status === 'inProgress' ? 'En Progreso' : 'Pendiente'}
+                        </span>
+                        <div className="flex gap-4">
+                            <span className="flex items-center" title="Horas totales (incluye subtareas)"><Clock className="w-4 h-4 mr-1"/> {aggregatedHours.toFixed(1)}h</span>
+                            <span className="flex items-center"><AlertCircle className="w-4 h-4 mr-1 text-red-500"/> Límite: {formatDate(task.expirationDate)}</span>
+                        </div>
+                    </div>
                 </div>
-                
-                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} />}
-                {currentView === 'kanban' && (
-                    <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
-                        <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
-                        <BoardColumn title="En Progreso" tasks={tasksByStatus.inProgress} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
-                        <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
+
+                <div className="flex items-center space-x-2 pl-4">
+                    <button onClick={() => onEdit(task)} title="Editar Tarea" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Edit className="w-4 h-4" /></button>
+                    {isAdmin && task.status === 'inProgress' && <button onClick={() => onRevert(task.id, 'inProgress')} title="Devolver a Pendiente" className="p-2 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200 rounded-full hover:bg-yellow-100 dark:hover:bg-gray-700"><Undo2 className="w-4 h-4" /></button>}
+                    {isAdmin && task.status === 'done' && <button onClick={() => onRevert(task.id, 'done')} title="Reabrir Tarea" className="p-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 rounded-full hover:bg-red-100 dark:hover:bg-gray-700"><RotateCcw className="w-4 h-4" /></button>}
+                    {task.status === 'todo' && <button onClick={() => onTake(task.id)} title="Coger Tarea" className="p-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 rounded-full hover:bg-green-100 dark:hover:bg-gray-700"><ArrowRight className="w-4 h-4" /></button>}
+                    {task.status === 'inProgress' && <button onClick={() => onComplete(task)} title="Completar Tarea" className="p-2 text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-200 rounded-full hover:bg-sky-100 dark:hover:bg-gray-700"><Check className="w-4 h-4" /></button>}
+                </div>
+            </div>
+            {hasChildren && (
+                <div>
+                    <button onClick={() => setIsExpanded(!isExpanded)} className="w-full text-xs text-gray-500 dark:text-gray-400 py-1 bg-gray-50 dark:bg-gray-700/50 hover:bg-gray-100 dark:hover:bg-gray-700 flex items-center justify-center rounded-b-lg">
+                        <ChevronDown className={`w-4 h-4 mr-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                        {isExpanded ? 'Ocultar' : 'Mostrar'} {children.length} subtarea(s)
+                    </button>
+                    {isExpanded && (
+                        <div className="p-2 space-y-2">
+                            {children.map(child => (
+                                <WorkloadTaskItem 
+                                    key={child.id} task={child} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
+                                    level={0} onNavigate={onNavigate} onTake={onTake} onComplete={onComplete}
+                                    onRevert={onRevert} onEdit={onEdit} loggedInUser={loggedInUser} team={team}
+                                />
+                            ))}
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+};
+
+
+/**
+ * Dashboard de carga de trabajo personal.
+ * Muestra todas las tareas asignadas al usuario con horas acumuladas.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Array} props.allTasks - Todas las tareas del sistema.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Function} props.getAggregatedHours - Función para calcular horas.
+ * @param {Function} props.onNavigate - Función de navegación.
+ * @param {Function} props.onTake - Función para tomar tarea.
+ * @param {Function} props.onComplete - Función para completar.
+ * @param {Function} props.onRevert - Función para revertir.
+ * @param {Function} props.onEdit - Función para editar.
+ * @param {Array} props.team - Lista de miembros.
+ * @returns {JSX.Element} Dashboard de carga de trabajo.
+ */
+export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, team }) {
+    
+    const myTasks = useMemo(() => {
+        return allTasks.filter(task => task.assigneeId === loggedInUser.uid && task.status !== 'done');
+    }, [allTasks, loggedInUser.uid]);
+
+    const rootMyTasks = useMemo(() => {
+        const myTaskIds = new Set(myTasks.map(t => t.id));
+        return myTasks.filter(task => !task.parentId || !myTaskIds.has(task.parentId));
+    }, [myTasks]);
+
+    const totalHours = useMemo(() => {
+        return rootMyTasks.reduce((sum, task) => sum + getAggregatedHours(task.id, allTasks), 0);
+    }, [rootMyTasks, allTasks, getAggregatedHours]);
+    
+    return (
+        <div className="max-w-5xl mx-auto">
+            <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md mb-6">
+                <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Mi Carga de Trabajo</h2>
+                <p className="text-gray-600 dark:text-gray-400">Total de horas estimadas (pendientes y en progreso): <span className="font-bold text-sky-600 dark:text-sky-400 text-lg">{totalHours.toFixed(1)}h</span></p>
+            </div>
+
+            <div className="space-y-2">
+                {rootMyTasks.length === 0 && (
+                    <div className="text-center py-16 text-gray-500 dark:text-gray-400">
+                        <p>No tienes tareas asignadas.</p>
                     </div>
                 )}
-                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} />}
-
-            </main>
-            {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} /></Modal>}
-            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} /></Modal>}
-            {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
+                {rootMyTasks.map(task => (
+                    <WorkloadTaskItem 
+                        key={task.id} task={task} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
+                        onNavigate={onNavigate} onTake={onTake} onComplete={onComplete} onRevert={onRevert}
+                        onEdit={onEdit} loggedInUser={loggedInUser} team={team}
+                    />
+                ))}
+            </div>
         </div>
     );
 }

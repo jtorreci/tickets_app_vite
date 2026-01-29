@@ -1,8 +1,30 @@
+"""
+Gestión de equipo para Synaptic Flow.
+
+Permite invitar miembros, asignar roles y gestionar
+el equipo de un proyecto.
+
+@module TeamManagement
+@component
+"""
+
 import React, { useState } from 'react';
 import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Users, XCircle } from 'lucide-react';
 import Spinner from './Spinner';
 
+/**
+ * Panel de gestión de equipo de un proyecto.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Object} props.project - Proyecto a gestionar.
+ * @param {Array} props.allUsers - Todos los usuarios del sistema.
+ * @param {Object} props.db - Instancia de Firestore.
+ * @param {string} props.tasksCollectionPath - Ruta de tareas.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Function} props.onClose - Función para cerrar.
+ * @returns {JSX.Element} Panel de gestión de equipo.
+ */
 export default function TeamManagement({ project, allUsers, db, tasksCollectionPath, loggedInUser, onClose }) {
     const [inviteEmail, setInviteEmail] = useState('');
     const [error, setError] = useState('');

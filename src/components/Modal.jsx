@@ -1,5 +1,23 @@
+"""
+Modal genérico para Synaptic Flow.
+
+Componente reutilizable para mostrar contenido en una ventana
+modal con overlay y botón de cierre.
+
+@module Modal
+@component
+"""
+
 import React from 'react';
 
+/**
+ * Modal genérico con overlay y cierre automático.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {React.ReactNode} props.children - Contenido del modal.
+ * @param {Function} props.onClose - Función para cerrar el modal.
+ * @returns {JSX.Element} Ventana modal.
+ */
 export default function Modal({ children, onClose }) {
     return (
         <div className="fixed inset-0 bg-black bg-opacity-60 z-50 flex justify-center items-center p-4">

@@ -1,7 +1,30 @@
+"""
+Formulario de creación y edición de tareas para Synaptic Flow.
+
+Permite crear proyectos, subtareas, establecer dependencias
+y vincular proyectos existentes.
+
+@module TaskForm
+@component
+"""
+
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { Edit, Plus, XCircle, Link } from 'lucide-react';
+import { Edit, Plus, XCircle } from 'lucide-react';
 
+/**
+ * Formulario para crear o editar tareas/proyectos.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Function} props.onSave - Función para guardar la tarea.
+ * @param {Function} props.onLinkProject - Función para vincular proyecto.
+ * @param {Function} props.onClose - Función para cerrar el modal.
+ * @param {Array} props.allTasks - Lista de todas las tareas.
+ * @param {Object} props.taskToEdit - Tarea a editar (null para nueva).
+ * @param {string} props.parentId - ID del padre (para subtareas).
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @returns {JSX.Element} Formulario de tarea.
+ */
 export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, taskToEdit, parentId = null, loggedInUser }) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
@@ -9,6 +32,8 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
     const [expirationDate, setExpirationDate] = useState('');
     const [dependencies, setDependencies] = useState([]);
     const [expectedHours, setExpectedHours] = useState('');
+    const [isProject, setIsProject] = useState(true); // Nuevo estado para el checkbox
+    const [linkedProjectId, setLinkedProjectId] = useState('');
 
     const getAncestors = (taskId, tasksMap) => {
         let ancestors = new Set();
@@ -33,13 +58,15 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         return descendants;
     };
     
-    const getSuccessors = (taskId, tasks) => {
+    const getSuccessors = (taskId, tasks, visited = new Set()) => {
+        if (!taskId || visited.has(taskId)) return new Set();
+        visited.add(taskId);
+
         let successors = new Set();
-        if (!taskId) return successors;
         const directSuccessors = tasks.filter(t => t.dependencies?.includes(taskId));
         for (const successor of directSuccessors) {
             successors.add(successor.id);
-            const indirectSuccessors = getSuccessors(successor.id, tasks);
+            const indirectSuccessors = getSuccessors(successor.id, tasks, visited);
             successors = new Set([...successors, ...indirectSuccessors]);
         }
         return successors;
@@ -55,14 +82,17 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             const descendants = getDescendants(taskToEdit.id, allTasks);
             const successors = getSuccessors(taskToEdit.id, allTasks);
             invalidIds = new Set([taskToEdit.id, ...ancestors, ...descendants, ...successors]);
+        } else {
+             const ancestors = getAncestors(parentId, tasksMap);
+             invalidIds = new Set([...ancestors]);
         }
         
         return allTasks.filter(t => !invalidIds.has(t.id));
-    }, [allTasks, taskToEdit]);
+    }, [allTasks, taskToEdit, parentId]);
     
     const linkableProjects = useMemo(() => {
-        return allTasks.filter(t => t.parentId === null && !t.memberIds.includes(loggedInUser.uid));
-    }, [allTasks, loggedInUser.uid]);
+        return allTasks.filter(t => t.isProject);
+    }, [allTasks]);
 
     const getProjectName = (taskId) => {
         const tasksMap = new Map(allTasks.map(t => [t.id, t]));
@@ -85,6 +115,7 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             setExpirationDate(taskToEdit.expirationDate ? new Date(taskToEdit.expirationDate.seconds * 1000).toISOString().split('T')[0] : '');
             setDependencies(taskToEdit.dependencies || []);
             setExpectedHours(taskToEdit.expectedHours || '');
+            setIsProject(taskToEdit.isProject || false);
         }
     }, [taskToEdit]);
 
@@ -97,7 +128,8 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             expirationDate: expirationDate ? Timestamp.fromDate(new Date(expirationDate)) : null, 
             dependencies,
             expectedHours: Number(expectedHours) || 0,
-            parentId
+            parentId,
+            isProject: parentId === null ? isProject : false // Solo las tareas raíz pueden ser proyectos
         });
     };
 
@@ -115,6 +147,7 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
 
     const handleLinkProjectSelect = (e) => {
         const projectIdToLink = e.target.value;
+        setLinkedProjectId(projectIdToLink);
         if (projectIdToLink) {
             onLinkProject({ projectIdToLink, parentId });
         }
@@ -133,6 +166,12 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
                 <>
                 <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Título</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputStyle} required /></div>
                 <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Descripción</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className={inputStyle} rows="3"></textarea></div>
+                {parentId === null && (
+                    <div className="flex items-center">
+                        <input id="isProject" type="checkbox" checked={isProject} onChange={(e) => setIsProject(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
+                        <label htmlFor="isProject" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Marcar como Proyecto</label>
+                    </div>
+                )}
                 <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Horas Estimadas</label><input type="number" value={expectedHours} onChange={(e) => setExpectedHours(e.target.value)} className={inputStyle} placeholder="Ej: 8" /></div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Fecha de Inicio Prevista</label><input type="date" value={plannedStartDate} onChange={(e) => setPlannedStartDate(e.target.value)} className={inputStyle} /></div>
@@ -180,7 +219,7 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
                     </>
                 )}
                 {!taskToEdit && (
-                     <select onChange={handleLinkProjectSelect} value="" className={`${inputStyle}`}>
+                     <select onChange={handleLinkProjectSelect} value={linkedProjectId} className={`${inputStyle}`}>
                         <option value="" disabled>Seleccionar un proyecto para vincular...</option>
                         {linkableProjects.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
                     </select>

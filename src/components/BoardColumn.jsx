@@ -1,6 +1,34 @@
+"""
+Columna del tablero Kanban para Synaptic Flow.
+
+Representa una columna de estado (Pendiente, En Progreso, Hecho)
+y renderiza las tareas correspondientes.
+
+@module BoardColumn
+@component
+"""
+
 import React, { useMemo } from 'react';
 import TaskCard from './TaskCard';
 
+/**
+ * Columna del tablero Kanban.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {string} props.title - Título de la columna.
+ * @param {Array} props.tasks - Tareas a mostrar en la columna.
+ * @param {Function} props.onTake - Función para tomar una tarea.
+ * @param {Function} props.onComplete - Función para completar una tarea.
+ * @param {Function} props.onRevert - Función para revertir estado.
+ * @param {Function} props.onEditTicket - Función para editar tarea.
+ * @param {Function} props.onAssign - Función para asignar tarea.
+ * @param {Function} props.onDelete - Función para borrar tarea.
+ * @param {Array} props.allTasks - Lista de todas las tareas.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Array} props.team - Lista de miembros del equipo.
+ * @param {Function} props.onNavigate - Función de navegación.
+ * @returns {JSX.Element} Columna Kanban.
+ */
 export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert, onEditTicket, onAssign, onDelete, allTasks, loggedInUser, team, onNavigate }) {
     const taskStatusMap = useMemo(() => {
         const map = new Map();

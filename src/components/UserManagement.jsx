@@ -1,8 +1,28 @@
+"""
+Gestión de usuarios para Synaptic Flow.
+
+Panel de administración para gestionar roles de usuarios
+y restaurar tareas eliminadas.
+
+@module UserManagement
+@component
+"""
+
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, where } from 'firebase/firestore';
 import { Users, Trash2, RotateCcw } from 'lucide-react';
 import Spinner from './Spinner';
 
+/**
+ * Panel de administración de usuarios.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Object} props.db - Instancia de Firestore.
+ * @param {string} props.teamCollectionPath - Ruta de miembros.
+ * @param {string} props.tasksCollectionPath - Ruta de tareas.
+ * @param {Function} props.onRestoreTask - Función para restaurar tarea.
+ * @returns {JSX.Element} Panel de gestión de usuarios.
+ */
 export default function UserManagement({ db, teamCollectionPath, tasksCollectionPath, onRestoreTask }) {
     const [users, setUsers] = useState([]);
     const [deletedTasks, setDeletedTasks] = useState([]);

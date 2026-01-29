@@ -1,6 +1,27 @@
+"""
+Dashboard de proyectos para Synaptic Flow.
+
+Muestra tarjetas de todos los proyectos con métricas
+de progreso, horas y estado.
+
+@module ProjectsDashboard
+@component
+"""
+
 import React, { useMemo } from 'react';
 import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
 
+/**
+ * Dashboard que muestra tarjetas de proyectos.
+ *
+ * @param {Object} props - Propiedades del componente.
+ * @param {Array} props.allTasks - Lista de todas las tareas.
+ * @param {Function} props.onNavigate - Función de navegación.
+ * @param {Function} props.onEdit - Función para editar proyecto.
+ * @param {Function} props.onDelete - Función para borrar proyecto.
+ * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @returns {JSX.Element} Grid de proyectos.
+ */
 export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDelete, loggedInUser }) {
     
     const projects = useMemo(() => {
