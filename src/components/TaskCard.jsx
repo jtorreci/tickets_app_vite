@@ -1,4 +1,4 @@
-"""
+/*
 Tarjeta de tarea para Synaptic Flow.
 
 Muestra información detallada de una tarea incluyendo:

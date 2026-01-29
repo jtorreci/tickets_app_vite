@@ -1,4 +1,4 @@
-"""
+/*
 Pantalla de autenticación para Synaptic Flow.
 
 Maneja el inicio de sesión y registro de usuarios mediante Firebase Auth.
@@ -6,7 +6,7 @@ Los nuevos usuarios se crean con rol 'pending' esperando aprobación.
 
 @module AuthScreen
 @component
-"""
+/*
 
 import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';

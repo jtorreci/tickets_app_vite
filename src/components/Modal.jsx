@@ -1,4 +1,4 @@
-"""
+/*
 Modal genérico para Synaptic Flow.
 
 Componente reutilizable para mostrar contenido en una ventana
@@ -6,7 +6,7 @@ modal con overlay y botón de cierre.
 
 @module Modal
 @component
-"""
+/*
 
 import React from 'react';
 

@@ -1,4 +1,4 @@
-"""
+/*
 Dashboard de proyectos para Synaptic Flow.
 
 Muestra tarjetas de todos los proyectos con métricas
@@ -6,7 +6,7 @@ de progreso, horas y estado.
 
 @module ProjectsDashboard
 @component
-"""
+/*
 
 import React, { useMemo } from 'react';
 import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';

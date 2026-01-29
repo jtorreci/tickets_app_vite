@@ -1,11 +1,11 @@
-"""
+/*
 Componente Spinner de carga para Synaptic Flow.
 
 Indicador visual de carga animado.
 
 @module Spinner
 @component
-"""
+/*
 
 import React from 'react';
 

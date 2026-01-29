@@ -1,11 +1,11 @@
-"""
+/*
 Modal de registro de horas para Synaptic Flow.
 
 Permite registrar las horas reales dedicadas al completar una tarea.
 
 @module LogHoursModal
 @component
-"""
+/*
 
 import React, { useState } from 'react';
 import { Check } from 'lucide-react';

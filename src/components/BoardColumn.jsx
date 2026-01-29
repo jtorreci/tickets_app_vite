@@ -1,4 +1,4 @@
-"""
+/*
 Columna del tablero Kanban para Synaptic Flow.
 
 Representa una columna de estado (Pendiente, En Progreso, Hecho)
@@ -6,7 +6,7 @@ y renderiza las tareas correspondientes.
 
 @module BoardColumn
 @component
-"""
+/*
 
 import React, { useMemo } from 'react';
 import TaskCard from './TaskCard';

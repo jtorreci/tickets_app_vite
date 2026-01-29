@@ -1,4 +1,4 @@
-"""
+/*
 Formulario de creación y edición de tareas para Synaptic Flow.
 
 Permite crear proyectos, subtareas, establecer dependencias
@@ -6,7 +6,7 @@ y vincular proyectos existentes.
 
 @module TaskForm
 @component
-"""
+/*
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';

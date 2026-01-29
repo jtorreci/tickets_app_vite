@@ -1,4 +1,4 @@
-"""
+/*
 Dashboard de carga de trabajo personal para Synaptic Flow.
 
 Muestra las tareas asignadas al usuario con sus horas
@@ -6,7 +6,7 @@ estimadas y permite gestión rápida.
 
 @module MyWorkloadDashboard
 @component
-"""
+/*
 
 import React, { useMemo, useState } from 'react';
 import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown } from 'lucide-react';
