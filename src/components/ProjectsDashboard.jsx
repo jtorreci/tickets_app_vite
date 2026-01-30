@@ -9,7 +9,7 @@ de progreso, horas y estado.
 */
 
 import React, { useMemo } from 'react';
-import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';
+import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2, Users } from 'lucide-react';
 
 /**
  * Dashboard que muestra tarjetas de proyectos.
@@ -19,10 +19,12 @@ import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2 } from 'luc
  * @param {Function} props.onNavigate - Función de navegación.
  * @param {Function} props.onEdit - Función para editar proyecto.
  * @param {Function} props.onDelete - Función para borrar proyecto.
+ * @param {Function} props.onManageTeam - Función para gestionar equipo.
  * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Function} props.canManageTeam - Función para verificar si puede gestionar equipo.
  * @returns {JSX.Element} Grid de proyectos.
  */
-export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDelete, loggedInUser }) {
+export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDelete, onManageTeam, loggedInUser, canManageTeam }) {
     
     const projects = useMemo(() => {
         const activeTasks = allTasks.filter(task => !task.deleted);
@@ -50,8 +52,8 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
                 }
             } else {
                  if (project.status === 'done') {
-                    status = 'finished';
-                    completedCount = 1;
+                     status = 'finished';
+                     completedCount = 1;
                  }
                  if (project.status === 'inProgress') status = 'inProgress';
             }
@@ -72,7 +74,6 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
         finished: 'bg-green-50 dark:bg-green-900/50 border-green-300 dark:border-green-700',
     };
     
-    const isAdmin = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
     const formatDate = (timestamp) => timestamp ? new Date(timestamp.seconds * 1000).toLocaleDateString() : 'N/A';
 
     return (
@@ -83,19 +84,27 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
                     <p>Usa el botón "+ Nuevo Proyecto" para empezar.</p>
                 </div>
             )}
-            {projects.map(project => (
+            {projects.map(project => {
+                const canEdit = canManageTeam ? canManageTeam(project) : (project.ownerId === loggedInUser?.uid || project.team?.find(m => m.userId === loggedInUser?.uid)?.role === 'admin');
+                
+                return (
                 <div key={project.id} className={`p-4 rounded-lg shadow-md border ${statusStyles[project.status]} flex flex-col`}>
                     <div className="flex justify-between items-start">
                         <h3 className="font-bold text-xl text-gray-900 dark:text-white">{project.title}</h3>
                         <div className="flex items-center space-x-2">
-                            {isAdmin && (
+                            {canEdit && (
                                 <>
                                 <button onClick={() => onEdit(project)} className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
                                     <Edit className="w-4 h-4"/>
                                 </button>
+                                <button onClick={() => onManageTeam(project)} className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title="Gestionar equipo">
+                                    <Users className="w-4 h-4"/>
+                                </button>
+                                {project.ownerId === loggedInUser?.uid && (
                                 <button onClick={() => onDelete(project.id)} disabled={project.hasChildren} title={project.hasChildren ? "No se puede borrar, tiene subtareas" : "Borrar proyecto"} className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
                                     <Trash2 className="w-4 h-4"/>
                                 </button>
+                                )}
                                 </>
                             )}
                             <button onClick={() => onNavigate(project)} className="bg-sky-100 dark:bg-sky-800 text-sky-700 dark:text-sky-200 px-3 py-1 rounded-md text-sm hover:bg-sky-200 dark:hover:bg-sky-700 flex items-center">
@@ -119,13 +128,13 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
                         <div className="flex items-center"><Clock className="w-4 h-4 mr-2" /> {project.totalActual.toFixed(1)}h / {project.totalExpected.toFixed(1)}h</div>
                         {project.status === 'finished' && (
                              <div className={`flex items-center font-semibold ${project.deviation > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                                {project.deviation > 0 ? <TrendingUp className="w-4 h-4 mr-2"/> : <TrendingDown className="w-4 h-4 mr-2"/>}
-                                {project.deviation.toFixed(1)}h
-                            </div>
+                                 {project.deviation > 0 ? <TrendingUp className="w-4 h-4 mr-2"/> : <TrendingDown className="w-4 h-4 mr-2"/>}
+                                 {project.deviation.toFixed(1)}h
+                             </div>
                         )}
                     </div>
                 </div>
-            ))}
+            )})}
         </div>
     );
 }

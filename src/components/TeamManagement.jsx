@@ -25,13 +25,19 @@ import Spinner from './Spinner';
  * @param {Function} props.onClose - Función para cerrar.
  * @returns {JSX.Element} Panel de gestión de equipo.
  */
-export default function TeamManagement({ project, allUsers, db, tasksCollectionPath, loggedInUser, onClose }) {
+export default function TeamManagement({ project, allUsers, db, tasksCollectionPath, loggedInUser, onClose, canManageTeam }) {
     const [inviteEmail, setInviteEmail] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
+    const isProjectOwner = project.ownerId === loggedInUser?.uid;
+    const isProjectAdmin = project.team?.find(m => m.userId === loggedInUser?.uid)?.role === 'admin';
+    const canManage = canManageTeam ? canManageTeam(project) : (isProjectOwner || isProjectAdmin);
+
     const handleInvite = async (e) => {
         e.preventDefault();
+        if (!canManage) return;
+        
         setError('');
         setIsLoading(true);
         try {
@@ -47,7 +53,7 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
             const userDoc = querySnapshot.docs[0];
             const userId = userDoc.id;
 
-            if (project.memberIds.includes(userId)) {
+            if (project.memberIds?.includes(userId)) {
                  setError("Este usuario ya es miembro del proyecto.");
                  setIsLoading(false);
                  return;
@@ -69,7 +75,9 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
     };
     
     const handleRemove = async (userId) => {
-        const userToRemove = project.team.find(m => m.userId === userId);
+        if (!canManage) return;
+        
+        const userToRemove = project.team?.find(m => m.userId === userId);
         if (!userToRemove) return;
 
         const projectRef = doc(db, tasksCollectionPath, project.id);
@@ -80,21 +88,31 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
     };
 
     const handleRoleChange = async (userId, newRole) => {
-        const newTeam = project.team.map(member => 
+        if (!canManage) return;
+        
+        const newTeam = project.team?.map(member => 
             member.userId === userId ? { ...member, role: newRole } : member
         );
         const projectRef = doc(db, tasksCollectionPath, project.id);
         await updateDoc(projectRef, { team: newTeam });
     };
 
-    const projectOwnerId = project.team.find(m => m.role === 'admin')?.userId;
+    const projectOwnerId = project.ownerId;
 
     return (
         <div>
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white mb-4 flex items-center"><Users className="mr-3"/>Gestionar Equipo de "{project.title}"</h2>
             
+            {isProjectOwner && (
+                <div className="mb-4 p-3 bg-sky-50 dark:bg-sky-900/30 rounded-md border border-sky-200 dark:border-sky-700">
+                    <p className="text-sm text-sky-700 dark:text-sky-300">
+                        <strong>Eres el propietario</strong> de este proyecto. Tienes control total sobre el equipo.
+                    </p>
+                </div>
+            )}
+            
             <div className="space-y-3 mb-6">
-                {project.team.map(member => {
+                {project.team?.map(member => {
                     const userProfile = allUsers.find(u => u.id === member.userId);
                     const isOwner = member.userId === projectOwnerId;
                     return (
@@ -108,12 +126,12 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
                                     value={member.role} 
                                     onChange={(e) => handleRoleChange(member.userId, e.target.value)}
                                     className="p-2 border rounded-md bg-white dark:bg-gray-700 dark:border-gray-600 dark:text-white text-sm"
-                                    disabled={isOwner}
+                                    disabled={isOwner || !canManage}
                                 >
                                     <option value="member">Miembro</option>
                                     <option value="admin">Admin</option>
                                 </select>
-                                {!isOwner && (
+                                {!isOwner && canManage && (
                                     <button onClick={() => handleRemove(member.userId)} title="Eliminar del equipo" className="p-2 text-red-500 hover:text-red-700 dark:hover:text-red-300 rounded-full hover:bg-red-100 dark:hover:bg-gray-600">
                                         <XCircle className="w-4 h-4"/>
                                     </button>
@@ -124,19 +142,25 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
                 })}
             </div>
 
-            <form onSubmit={handleInvite} className="space-y-4 border-t pt-6 border-gray-300 dark:border-gray-600">
-                <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Invitar a un miembro</h3>
-                {error && <p className="text-sm text-red-500">{error}</p>}
-                <div>
-                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Email del usuario</label>
-                    <div className="flex gap-2">
-                        <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" required />
-                        <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 disabled:bg-sky-300">
-                            {isLoading ? <Spinner /> : "Invitar"}
-                        </button>
+            {canManage ? (
+                <form onSubmit={handleInvite} className="space-y-4 border-t pt-6 border-gray-300 dark:border-gray-600">
+                    <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Invitar a un miembro</h3>
+                    {error && <p className="text-sm text-red-500">{error}</p>}
+                    <div>
+                        <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Email del usuario</label>
+                        <div className="flex gap-2">
+                            <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" required />
+                            <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 disabled:bg-sky-300">
+                                {isLoading ? <Spinner /> : "Invitar"}
+                            </button>
+                        </div>
                     </div>
+                </form>
+            ) : (
+                <div className="p-4 bg-gray-100 dark:bg-gray-700/50 rounded-md text-center text-gray-600 dark:text-gray-400">
+                    No tienes permisos para gestionar el equipo de este proyecto.
                 </div>
-            </form>
+            )}
         </div>
     );
 };

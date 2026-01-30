@@ -67,8 +67,13 @@ export default function App() {
     
     const activeTasks = useMemo(() => allTasks.filter(task => !task.deleted), [allTasks]);
     const currentTasks = useMemo(() => activeTasks.filter(task => task.parentId === currentParentId), [activeTasks, currentParentId]);
-    // ¡CORREGIDO! Un proyecto es una tarea con isProject = true
-    const userProjects = useMemo(() => activeTasks.filter(task => task.isProject), [activeTasks]);
+    const userProjects = useMemo(() => {
+        if (!loggedInUser) return [];
+        return activeTasks.filter(task => 
+            task.isProject && 
+            (task.ownerId === loggedInUser.uid || task.memberIds?.includes(loggedInUser.uid))
+        );
+    }, [activeTasks, loggedInUser]);
 
     useEffect(() => {
         const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
@@ -104,9 +109,14 @@ export default function App() {
             return;
         };
 
-        const qTasks = query(collection(db, tasksCollectionPath), where('memberIds', 'array-contains', loggedInUser.uid));
+        const qTasks = query(collection(db, tasksCollectionPath), where('deleted', '==', false));
         const unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
-            setAllTasks(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
+            const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            const visibleTasks = tasks.filter(task => 
+                task.ownerId === loggedInUser.uid || 
+                (task.memberIds && task.memberIds.includes(loggedInUser.uid))
+            );
+            setAllTasks(visibleTasks);
         });
 
         const qMessages = query(collection(db, messagesCollectionPath), where('recipientId', '==', loggedInUser.uid));
@@ -190,6 +200,38 @@ export default function App() {
     }
 
     /**
+     * Verifica si el usuario es owner del proyecto/tarea
+     */
+    const isOwner = (task) => task?.ownerId === loggedInUser?.uid;
+
+    /**
+     * Verifica si el usuario es admin del proyecto/tarea
+     */
+    const isAdmin = (task) => {
+        if (!task?.team || !loggedInUser) return false;
+        const member = task.team.find(m => m.userId === loggedInUser.uid);
+        return member?.role === 'admin';
+    };
+
+    /**
+     * Verifica si el usuario puede editar el proyecto/tarea
+     */
+    const canEdit = (task) => isOwner(task) || isAdmin(task);
+
+    /**
+     * Verifica si el usuario puede añadir colaboradores
+     */
+    const canManageTeam = (task) => isOwner(task) || isAdmin(task);
+
+    /**
+     * Verifica si el usuario puede crear subtareas
+     */
+    const canCreateSubtask = (task) => {
+        if (!task) return true;
+        return isOwner(task) || isAdmin(task) || task.memberIds?.includes(loggedInUser.uid);
+    };
+
+    /**
      * Guarda una nueva tarea o actualiza una existente.
      *
      * @param {Object} taskData - Datos de la tarea a guardar.
@@ -205,12 +247,14 @@ export default function App() {
                 const newTask = { ...taskData, status: 'todo', createdAt: Timestamp.now(), assigneeId: null, actualHours: 0, isLocked: taskData.dependencies?.length > 0, deleted: false, taskType: 'standard' };
                 
                 if (taskData.parentId === null) {
+                    newTask.ownerId = loggedInUser.uid;
                     newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
                     newTask.memberIds = [loggedInUser.uid];
                     const docRef = await addDoc(collection(db, tasksCollectionPath), newTask);
                     await updateDoc(docRef, { projectId: docRef.id });
                 } else {
-                    newTask.isProject = false; // Subtareas nunca son proyectos
+                    newTask.isProject = false;
+                    newTask.ownerId = parentTask.ownerId;
                     newTask.team = parentTask.team;
                     newTask.memberIds = parentTask.memberIds;
                     newTask.projectId = parentTask.projectId;
@@ -425,10 +469,10 @@ export default function App() {
                             </React.Fragment>
                         ))}
                     </nav>
-                    {currentView !== 'my-workload' && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
+                    {currentView !== 'my-workload' && currentTasks.length > 0 && canCreateSubtask(currentTasks[0]?.parentId ? allTasks.find(t => t.id === currentTasks[0].parentId) : { parentId: null }) && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
                 </div>
                 
-                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} />}
+                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} canManageTeam={canManageTeam} />}
                 {currentView === 'kanban' && (
                     <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
                         <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
@@ -439,7 +483,7 @@ export default function App() {
                 {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
 
             </main>
-            {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} /></Modal>}
+            {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} canManageTeam={canManageTeam} /></Modal>}
             {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
         </div>
