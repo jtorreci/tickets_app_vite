@@ -68,6 +68,7 @@ export default function AuthScreen({ db, auth, teamCollectionPath }) {
             }
         } catch (err) {
             setError(err.message);
+        } finally {
             setIsLoading(false);
         }
     };
