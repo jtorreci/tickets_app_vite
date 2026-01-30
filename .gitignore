@@ -26,3 +26,8 @@ dist-ssr
 .env.local
 service-account.json
 service-account.json
+
+# OpenCode
+opencode_vibe.sh
+.ai
+tools

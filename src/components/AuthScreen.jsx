@@ -6,7 +6,7 @@ Los nuevos usuarios se crean con rol 'pending' esperando aprobación.
 
 @module AuthScreen
 @component
-/*
+*/
 
 import React, { useState } from 'react';
 import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'firebase/auth';
