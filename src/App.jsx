@@ -12,7 +12,7 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion, writeBatch } from 'firebase/firestore';
+import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion, writeBatch, getDoc, setDoc } from 'firebase/firestore';
 import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react';
 
 // --- Componentes de la aplicación ---
@@ -71,13 +71,25 @@ export default function App() {
     const userProjects = useMemo(() => activeTasks.filter(task => task.isProject), [activeTasks]);
 
     useEffect(() => {
-        const unsubscribeAuth = onAuthStateChanged(auth, (user) => {
+        const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
             if (user) {
                 const userDocRef = doc(db, teamCollectionPath, user.uid);
-                onSnapshot(userDocRef, (docSnap) => {
-                    if (docSnap.exists()) setLoggedInUser({ uid: user.uid, ...docSnap.data() });
-                    setIsLoading(false);
-                });
+                try {
+                    const docSnap = await getDoc(userDocRef);
+                    if (docSnap.exists()) {
+                        setLoggedInUser({ uid: user.uid, ...docSnap.data() });
+                    } else {
+                        await setDoc(userDocRef, {
+                            username: user.email.split('@')[0],
+                            email: user.email,
+                            role: 'pending'
+                        });
+                        setLoggedInUser({ uid: user.uid, username: user.email.split('@')[0], email: user.email, role: 'pending' });
+                    }
+                } catch (error) {
+                    console.error("Error checking user doc:", error);
+                }
+                setIsLoading(false);
             } else {
                 setLoggedInUser(null);
                 setIsLoading(false);
