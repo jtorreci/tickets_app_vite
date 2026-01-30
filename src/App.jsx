@@ -80,20 +80,19 @@ export default function App() {
                         setLoggedInUser({ uid: user.uid, ...docSnap.data() });
                     } else {
                         await setDoc(userDocRef, {
-                            username: user.email.split('@')[0],
+                            username: user.email?.split('@')[0] || 'user',
                             email: user.email,
                             role: 'pending'
                         });
-                        setLoggedInUser({ uid: user.uid, username: user.email.split('@')[0], email: user.email, role: 'pending' });
+                        setLoggedInUser({ uid: user.uid, username: user.email?.split('@')[0] || 'user', email: user.email, role: 'pending' });
                     }
                 } catch (error) {
                     console.error("Error checking user doc:", error);
                 }
-                setIsLoading(false);
             } else {
                 setLoggedInUser(null);
-                setIsLoading(false);
             }
+            setIsLoading(false);
         });
         return () => unsubscribeAuth();
     }, []);
