@@ -5,7 +5,7 @@ Indicador visual de carga animado.
 
 @module Spinner
 @component
-/*
+*/
 
 import React from 'react';
 

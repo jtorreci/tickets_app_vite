@@ -6,7 +6,7 @@ modal con overlay y botón de cierre.
 
 @module Modal
 @component
-/*
+*/
 
 import React from 'react';
 

@@ -6,7 +6,7 @@ de progreso, horas y estado.
 
 @module ProjectsDashboard
 @component
-/*
+*/
 
 import React, { useMemo } from 'react';
 import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2 } from 'lucide-react';

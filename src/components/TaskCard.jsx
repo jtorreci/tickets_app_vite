@@ -9,7 +9,7 @@ Muestra información detallada de una tarea incluyendo:
 
 @module TaskCard
 @component
-"""
+*/
 
 import React, { useMemo } from 'react';
 import { Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, RotateCcw, Undo2, AlertCircle, TrendingUp, TrendingDown, ExternalLink, Trash2, Hourglass, Link } from 'lucide-react';

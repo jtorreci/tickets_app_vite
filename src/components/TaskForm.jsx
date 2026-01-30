@@ -6,7 +6,7 @@ y vincular proyectos existentes.
 
 @module TaskForm
 @component
-/*
+*/
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';

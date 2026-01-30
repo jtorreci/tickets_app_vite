@@ -6,7 +6,7 @@ el equipo de un proyecto.
 
 @module TeamManagement
 @component
-/*
+*/
 
 import React, { useState } from 'react';
 import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';

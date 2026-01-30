@@ -6,7 +6,7 @@ y renderiza las tareas correspondientes.
 
 @module BoardColumn
 @component
-/*
+*/
 
 import React, { useMemo } from 'react';
 import TaskCard from './TaskCard';

@@ -6,7 +6,7 @@ y restaurar tareas eliminadas.
 
 @module UserManagement
 @component
-/*
+*/
 
 import React, { useState, useEffect } from 'react';
 import { collection, query, onSnapshot, doc, updateDoc, where } from 'firebase/firestore';
