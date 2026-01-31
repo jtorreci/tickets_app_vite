@@ -30,10 +30,15 @@ import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, Rotat
  */
 const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNavigate, onTake, onComplete, onRevert, onEdit, loggedInUser, team }) => {
     const [isExpanded, setIsExpanded] = useState(false);
-    const children = useMemo(() => allTasks.filter(t => t.parentId === task.id && t.assigneeId === loggedInUser.uid), [allTasks, task.id, loggedInUser.uid]);
+    const children = useMemo(() => allTasks.filter(t => t.parentId === task.id), [allTasks, task.id]);
     const aggregatedHours = useMemo(() => getAggregatedHours(task.id, allTasks), [task.id, allTasks, getAggregatedHours]);
     const hasChildren = children.length > 0;
-    
+    const isAssignedToMe = task.assigneeId === loggedInUser.uid;
+    const isOverdue = useMemo(() => {
+        if (!task?.expirationDate || task.status !== 'todo') return false;
+        return new Date(task.expirationDate.seconds * 1000) < new Date();
+    }, [task]);
+
     const formatDate = (timestamp) => timestamp ? new Date(timestamp.seconds * 1000).toLocaleDateString() : 'N/A';
     const isAdmin = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
 
@@ -51,7 +56,7 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
     const breadcrumbs = useMemo(() => findTaskBreadcrumbs(task.id, allTasks), [task.id, allTasks]);
 
     return (
-        <div className="bg-white dark:bg-gray-800 rounded-lg shadow-sm border border-gray-200 dark:border-gray-700" style={{ marginLeft: `${level * 1}rem` }}>
+        <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'}`} style={{ marginLeft: `${level * 1}rem` }}>
             <div className="p-3 flex items-center">
                 <div className="flex-grow">
                     <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mb-2 flex-wrap">
@@ -65,23 +70,44 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
                         ))}
                     </div>
                     <p className="font-semibold text-gray-900 dark:text-white">{task.title}</p>
-                    <div className="mt-2 flex justify-between items-center text-xs text-gray-500 dark:text-gray-400">
-                        <span className={`px-2 py-1 rounded-full text-white ${task.status === 'inProgress' ? 'bg-sky-500' : 'bg-gray-400'}`}>
-                            {task.status === 'inProgress' ? 'En Progreso' : 'Pendiente'}
-                        </span>
+                    <div className="mt-2 flex justify-between items-center text-xs text-gray-500 dark:text-gray-400 flex-wrap gap-2">
+                        <div className="flex items-center gap-2">
+                            <span className={`px-2 py-1 rounded-full text-white ${task.status === 'inProgress' ? 'bg-sky-500' : task.status === 'done' ? 'bg-green-500' : 'bg-gray-400'}`}>
+                                {task.status === 'inProgress' ? 'En Progreso' : task.status === 'done' ? 'Completada' : 'Pendiente'}
+                            </span>
+                            {isAssignedToMe && (
+                                <span className="px-2 py-1 rounded-full bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 text-xs">
+                                    Asignada a ti
+                                </span>
+                            )}
+                            {isOverdue && (
+                                <span className="px-2 py-1 rounded-full bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 text-xs flex items-center">
+                                    <AlertCircle className="w-3 h-3 mr-1" />
+                                    Vencida
+                                </span>
+                            )}
+                        </div>
                         <div className="flex gap-4">
                             <span className="flex items-center" title="Horas totales (incluye subtareas)"><Clock className="w-4 h-4 mr-1"/> {aggregatedHours.toFixed(1)}h</span>
-                            <span className="flex items-center"><AlertCircle className="w-4 h-4 mr-1 text-red-500"/> Límite: {formatDate(task.expirationDate)}</span>
+                            <span className="flex items-center"><AlertCircle className="w-4 h-4 mr-1"/> Límite: {formatDate(task.expirationDate)}</span>
                         </div>
                     </div>
                 </div>
 
                 <div className="flex items-center space-x-2 pl-4">
-                    <button onClick={() => onEdit(task)} title="Editar Tarea" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Edit className="w-4 h-4" /></button>
+                    {task.status === 'todo' && (isAssignedToMe || isOverdue) && (
+                        <button onClick={() => onTake(task.id)} title={isAssignedToMe ? "Coger Tarea" : "Esta tarea está vencida, puedes cogertela"} className="p-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 rounded-full hover:bg-green-100 dark:hover:bg-gray-700">
+                            <ArrowRight className="w-4 h-4" />
+                        </button>
+                    )}
+                    {task.status === 'inProgress' && isAssignedToMe && (
+                        <button onClick={() => onComplete(task)} title="Completar Tarea" className="p-2 text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-200 rounded-full hover:bg-sky-100 dark:hover:bg-gray-700"><Check className="w-4 h-4" /></button>
+                    )}
+                    {(isAssignedToMe || isAdmin) && (
+                        <button onClick={() => onEdit(task)} title="Editar Tarea" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Edit className="w-4 h-4" /></button>
+                    )}
                     {isAdmin && task.status === 'inProgress' && <button onClick={() => onRevert(task.id, 'inProgress')} title="Devolver a Pendiente" className="p-2 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200 rounded-full hover:bg-yellow-100 dark:hover:bg-gray-700"><Undo2 className="w-4 h-4" /></button>}
                     {isAdmin && task.status === 'done' && <button onClick={() => onRevert(task.id, 'done')} title="Reabrir Tarea" className="p-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 rounded-full hover:bg-red-100 dark:hover:bg-gray-700"><RotateCcw className="w-4 h-4" /></button>}
-                    {task.status === 'todo' && <button onClick={() => onTake(task.id)} title="Coger Tarea" className="p-2 text-green-600 hover:text-green-800 dark:text-green-400 dark:hover:text-green-200 rounded-full hover:bg-green-100 dark:hover:bg-gray-700"><ArrowRight className="w-4 h-4" /></button>}
-                    {task.status === 'inProgress' && <button onClick={() => onComplete(task)} title="Completar Tarea" className="p-2 text-sky-600 hover:text-sky-800 dark:text-sky-400 dark:hover:text-sky-200 rounded-full hover:bg-sky-100 dark:hover:bg-gray-700"><Check className="w-4 h-4" /></button>}
                 </div>
             </div>
             {hasChildren && (
@@ -127,7 +153,10 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
 export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, team }) {
     
     const myTasks = useMemo(() => {
-        return allTasks.filter(task => task.assigneeId === loggedInUser.uid && task.status !== 'done');
+        return allTasks.filter(task => 
+            (task.assigneeId === loggedInUser.uid || task.status === 'todo') && 
+            task.status !== 'done'
+        );
     }, [allTasks, loggedInUser.uid]);
 
     const rootMyTasks = useMemo(() => {
@@ -138,18 +167,33 @@ export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggrega
     const totalHours = useMemo(() => {
         return rootMyTasks.reduce((sum, task) => sum + getAggregatedHours(task.id, allTasks), 0);
     }, [rootMyTasks, allTasks, getAggregatedHours]);
+
+    const overdueTasks = useMemo(() => {
+        const now = new Date();
+        return rootMyTasks.filter(task => 
+            task.status === 'todo' && 
+            task.expirationDate && 
+            new Date(task.expirationDate.seconds * 1000) < now
+        );
+    }, [rootMyTasks]);
     
     return (
         <div className="max-w-5xl mx-auto">
             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md mb-6">
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Mi Carga de Trabajo</h2>
                 <p className="text-gray-600 dark:text-gray-400">Total de horas estimadas (pendientes y en progreso): <span className="font-bold text-sky-600 dark:text-sky-400 text-lg">{totalHours.toFixed(1)}h</span></p>
+                {overdueTasks.length > 0 && (
+                    <p className="text-red-600 dark:text-red-400 mt-2">
+                        ⚠️ Tienes {overdueTasks.length} tarea(s) vencida(s) que requieren atención
+                    </p>
+                )}
             </div>
 
             <div className="space-y-2">
                 {rootMyTasks.length === 0 && (
                     <div className="text-center py-16 text-gray-500 dark:text-gray-400">
                         <p>No tienes tareas asignadas.</p>
+                        <p className="text-sm mt-2">Las tareas asignadas a ti o las tareas vencidas aparecerán aquí.</p>
                     </div>
                 )}
                 {rootMyTasks.map(task => (

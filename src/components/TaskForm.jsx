@@ -10,7 +10,7 @@ y vincular proyectos existentes.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { Edit, Plus, XCircle } from 'lucide-react';
+import { Edit, Plus, XCircle, User } from 'lucide-react';
 
 /**
  * Formulario para crear o editar tareas/proyectos.
@@ -23,17 +23,39 @@ import { Edit, Plus, XCircle } from 'lucide-react';
  * @param {Object} props.taskToEdit - Tarea a editar (null para nueva).
  * @param {string} props.parentId - ID del padre (para subtareas).
  * @param {Object} props.loggedInUser - Usuario autenticado.
+ * @param {Array} props.team - Lista de todos los usuarios.
  * @returns {JSX.Element} Formulario de tarea.
  */
-export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, taskToEdit, parentId = null, loggedInUser }) {
+export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, taskToEdit, parentId = null, loggedInUser, team }) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
     const [plannedStartDate, setPlannedStartDate] = useState('');
     const [expirationDate, setExpirationDate] = useState('');
     const [dependencies, setDependencies] = useState([]);
     const [expectedHours, setExpectedHours] = useState('');
-    const [isProject, setIsProject] = useState(true); // Nuevo estado para el checkbox
+    const [isProject, setIsProject] = useState(true);
     const [linkedProjectId, setLinkedProjectId] = useState('');
+    const [assigneeId, setAssigneeId] = useState('');
+
+    const parentTask = useMemo(() => {
+        if (!parentId) return null;
+        return allTasks.find(t => t.id === parentId);
+    }, [parentId, allTasks]);
+
+    const availableCollaborators = useMemo(() => {
+        if (!parentTask) return [];
+        return parentTask.memberIds?.map(userId => {
+            const user = team?.find(u => u.id === userId);
+            return { id: userId, username: user?.username || 'Usuario desconocido', email: user?.email };
+        }) || [];
+    }, [parentTask, team]);
+
+    const isTaskOverdue = (task) => {
+        if (!task?.expirationDate) return false;
+        const now = new Date();
+        const expiration = new Date(task.expirationDate.seconds * 1000);
+        return expiration < now && task.status === 'todo';
+    };
 
     const getAncestors = (taskId, tasksMap) => {
         let ancestors = new Set();
@@ -116,6 +138,7 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             setDependencies(taskToEdit.dependencies || []);
             setExpectedHours(taskToEdit.expectedHours || '');
             setIsProject(taskToEdit.isProject || false);
+            setAssigneeId(taskToEdit.assigneeId || '');
         }
     }, [taskToEdit]);
 
@@ -129,7 +152,8 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             dependencies,
             expectedHours: Number(expectedHours) || 0,
             parentId,
-            isProject: parentId === null ? isProject : false // Solo las tareas raíz pueden ser proyectos
+            isProject: parentId === null ? isProject : false,
+            assigneeId: assigneeId || null
         });
     };
 
@@ -170,6 +194,24 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
                     <div className="flex items-center">
                         <input id="isProject" type="checkbox" checked={isProject} onChange={(e) => setIsProject(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
                         <label htmlFor="isProject" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Marcar como Proyecto</label>
+                    </div>
+                )}
+                
+                {parentId && availableCollaborators.length > 0 && (
+                    <div>
+                        <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center">
+                            <User className="w-4 h-4 mr-2" />
+                            Asignar a colaborador
+                        </label>
+                        <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputStyle}>
+                            <option value="">Sin asignar</option>
+                            {availableCollaborators.map(user => (
+                                <option key={user.id} value={user.id}>{user.username} ({user.email})</option>
+                            ))}
+                        </select>
+                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                            Solo puedes asignar a colaboradores del proyecto padre
+                        </p>
                     </div>
                 )}
                 <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Horas Estimadas</label><input type="number" value={expectedHours} onChange={(e) => setExpectedHours(e.target.value)} className={inputStyle} placeholder="Ej: 8" /></div>

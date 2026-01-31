@@ -484,7 +484,7 @@ export default function App() {
 
             </main>
             {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} canManageTeam={canManageTeam} /></Modal>}
-            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} /></Modal>}
+            {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} team={team} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
         </div>
     );
