@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get user ID
+    function getUserId() {
+      return request.auth.uid;
+    }
+    
+    // Helper function to check if user is owner of the task
+    function isOwner(task) {
+      return task.ownerId == getUserId();
+    }
+    
+    // Helper function to check if user is collaborator (in memberIds)
+    function isCollaborator(task) {
+      return getUserId() in task.memberIds;
+    }
+    
+    // Helper function to check if user is assignee
+    function isAssignee(task) {
+      return task.assigneeId == getUserId();
+    }
+    
+    // Helper function to check if user has access to the task
+    function hasTaskAccess(task) {
+      return isOwner(task) || isCollaborator(task) || isAssignee(task);
+    }
+    
+    // Helper function to check if user is admin or superuser of a project
+    function isProjectAdmin(task) {
+      return task.team != null && task.team.hasAny([{'userId': getUserId(), 'role': 'admin'}]);
+    }
+    
+    // Helper function to check user role
+    function getUserRole() {
+      return get(/databases/$(database)/documents/team_members/$(getUserId())).data.role;
+    }
+    
+    function isSuperuser() {
+      return isAuthenticated() && getUserRole() in ['superuser'];
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && getUserRole() in ['admin', 'superuser'];
+    }
+    
+    // ============================================
+    // TASKS COLLECTION
+    // ============================================
+    match /tasks/{taskId} {
+      allow read: if isAuthenticated() && hasTaskAccess(resource.data);
+      
+      allow create: if isAuthenticated() && (
+        // User can create tasks in projects they own or collaborate in
+        request.resource.data.parentId == null ? (
+          // New project: user becomes owner
+          request.resource.data.ownerId == getUserId() &&
+          request.resource.data.memberIds.hasAll([getUserId()])
+        ) : (
+          // New subtask: must be in a project user has access to
+          let parentTask = get(/databases/$(database)/documents/tasks/$(request.resource.data.parentId)).data;
+          hasTaskAccess(parentTask)
+        )
+      );
+      
+      allow update: if isAuthenticated() && (
+        isOwner(resource.data) || 
+        (isCollaborator(resource.data) && isProjectAdmin(resource.data))
+      );
+      
+      allow delete: if isAuthenticated() && isOwner(resource.data);
+    }
+    
+    // ============================================
+    // TEAM_MEMBERS COLLECTION
+    // ============================================
+    match /team_members/{userId} {
+      // Users can read their own profile
+      allow read: if isAuthenticated() && (
+        userId == getUserId() || 
+        isSuperuser() ||
+        isAdmin()
+      );
+      
+      // Users can only create their own profile (during registration)
+      allow create: if isAuthenticated() && userId == getUserId();
+      
+      // Only superusers can update roles
+      allow update: if isSuperuser();
+      
+      allow delete: if isSuperuser();
+    }
+    
+    // ============================================
+    // MESSAGES COLLECTION
+    // ============================================
+    match /messages/{messageId} {
+      allow read: if isAuthenticated() && (
+        resource.data.senderId == getUserId() ||
+        resource.data.recipientId == getUserId() ||
+        isSuperuser()
+      );
+      
+      allow create: if isAuthenticated() && (
+        request.resource.data.senderId == getUserId()
+      );
+      
+      allow update, delete: if isSuperuser();
+    }
+  }
+}
