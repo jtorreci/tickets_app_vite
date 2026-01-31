@@ -112,10 +112,17 @@ export default function App() {
         const qTasks = query(collection(db, tasksCollectionPath), where('deleted', '==', false));
         const unsubscribeTasks = onSnapshot(qTasks, (snapshot) => {
             const tasks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-            const visibleTasks = tasks.filter(task => 
-                task.ownerId === loggedInUser.uid || 
-                (task.memberIds && task.memberIds.includes(loggedInUser.uid))
-            );
+            const visibleTasks = tasks.filter(task => {
+                const isOwner = task.ownerId === loggedInUser.uid;
+                const isCollaborator = task.memberIds?.includes(loggedInUser.uid);
+                const isAssignee = task.assigneeId === loggedInUser.uid;
+                
+                if (isOwner || isCollaborator) return true;
+                if (isAssignee) {
+                    return true;
+                }
+                return false;
+            });
             setAllTasks(visibleTasks);
         });
 
