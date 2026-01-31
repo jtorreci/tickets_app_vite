@@ -545,7 +545,7 @@ export default function App() {
                             </React.Fragment>
                         ))}
                     </nav>
-                    {currentView !== 'my-workload' && currentTasks.length > 0 && canCreateSubtask(currentTasks[0]?.parentId ? allTasks.find(t => t.id === currentTasks[0].parentId) : { parentId: null }) && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
+                    {currentView !== 'my-workload' && (currentView === 'dashboard' || (currentTasks.length > 0 && canCreateSubtask(currentTasks[0]?.parentId ? allTasks.find(t => t.id === currentTasks[0].parentId) : { parentId: null }))) && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
                 </div>
                 
                 {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onRestore={handleRestoreTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} canManageTeam={canManageTeam} isTaskOwner={isTaskOwner} />}
