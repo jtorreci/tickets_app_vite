@@ -18,18 +18,20 @@ import TaskCard from './TaskCard';
  * @param {string} props.title - Título de la columna.
  * @param {Array} props.tasks - Tareas a mostrar en la columna.
  * @param {Function} props.onTake - Función para tomar una tarea.
- * @param {Function} props.onComplete - Función para completar una tarea.
+ * @param {Function} props.onComplete - Función para completar.
  * @param {Function} props.onRevert - Función para revertir estado.
  * @param {Function} props.onEditTicket - Función para editar tarea.
  * @param {Function} props.onAssign - Función para asignar tarea.
  * @param {Function} props.onDelete - Función para borrar tarea.
+ * @param {Function} props.onRestore - Función para restaurar tarea.
  * @param {Array} props.allTasks - Lista de todas las tareas.
  * @param {Object} props.loggedInUser - Usuario autenticado.
  * @param {Array} props.team - Lista de miembros del equipo.
  * @param {Function} props.onNavigate - Función de navegación.
+ * @param {Function} props.isTaskOwner - Función para verificar si es owner.
  * @returns {JSX.Element} Columna Kanban.
  */
-export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert, onEditTicket, onAssign, onDelete, allTasks, loggedInUser, team, onNavigate }) {
+export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert, onEditTicket, onAssign, onDelete, onRestore, allTasks, loggedInUser, team, onNavigate, isTaskOwner }) {
     const taskStatusMap = useMemo(() => {
         const map = new Map();
         allTasks.forEach(t => map.set(t.id, t.status));
@@ -42,6 +44,34 @@ export default function BoardColumn({ title, tasks, onTake, onComplete, onRevert
         }
         return task.dependencies.some(depId => taskStatusMap.get(depId) !== 'done');
     };
+
+    return (
+        <div className="bg-gray-100 dark:bg-gray-900/50 rounded-lg p-4 w-full md:w-1/3 flex-shrink-0">
+            <h3 className="font-bold text-xl text-gray-800 dark:text-white mb-4">{title}</h3>
+            <div className="space-y-4 h-full overflow-y-auto">
+                {tasks.map(task => (
+                    <TaskCard 
+                        key={task.id} 
+                        task={task} 
+                        onTake={onTake} 
+                        onComplete={onComplete} 
+                        onRevert={onRevert} 
+                        onEdit={onEditTicket} 
+                        onAssign={onAssign}
+                        onDelete={onDelete}
+                        onRestore={onRestore}
+                        onNavigate={onNavigate}
+                        isLocked={title === 'Pendiente' && isTaskLocked(task)} 
+                        loggedInUser={loggedInUser} 
+                        team={team} 
+                        allTasks={allTasks}
+                        isTaskOwner={isTaskOwner}
+                    />
+                ))}
+            </div>
+        </div>
+    );
+};
 
     return (
         <div className="bg-gray-100 dark:bg-gray-900/50 rounded-lg p-4 w-full md:w-1/3 flex-shrink-0">

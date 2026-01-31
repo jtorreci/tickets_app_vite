@@ -382,7 +382,7 @@ export default function App() {
     };
     
     /**
-     * Revierte el estado de una tarea al estado anterior.
+     * Revertir estado de una tarea.
      *
      * @param {string} taskId - ID de la tarea.
      * @param {string} currentStatus - Estado actual de la tarea.
@@ -394,21 +394,90 @@ export default function App() {
     };
 
     /**
-     * Borra una tarea (soft delete) si no tiene subtareas activas.
+     * Borra una tarea y todas sus subtareas en cascada (soft delete).
+     * Solo el propietario puede borrar.
      *
      * @param {string} taskId - ID de la tarea a borrar.
      */
     const handleDeleteTask = async (taskId) => {
-        if (allTasks.some(t => t.parentId === taskId && !t.deleted)) {
-            alert("No se puede borrar una tarea con subtareas activas.");
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task) return;
+        
+        if (task.ownerId !== loggedInUser.uid) {
+            alert("Solo el propietario puede borrar esta tarea.");
             return;
         }
-        if (window.confirm("¿Estás seguro de que quieres borrar esta tarea?")) {
-            await updateDoc(doc(db, tasksCollectionPath, taskId), { deleted: true });
+        
+        if (window.confirm("¿Estás seguro de que quieres borrar esta tarea y todas sus subtareas?")) {
+            const tasksToDelete = getAllDescendants(taskId, allTasks);
+            const batch = writeBatch(db);
+            
+            tasksToDelete.forEach(t => {
+                const taskRef = doc(db, tasksCollectionPath, t.id);
+                batch.update(taskRef, { deleted: true });
+            });
+            
+            await batch.commit();
         }
     };
 
     /**
+     * Recupera una tarea y todas sus subtareas en cascada (soft restore).
+     * Solo el owner o admin pueden recuperar.
+     *
+     * @param {string} taskId - ID de la tarea a recuperar.
+     */
+    const handleRestoreTask = async (taskId) => {
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task) return;
+        
+        const isOwner = task.ownerId === loggedInUser.uid;
+        const isAdminUser = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
+        
+        if (!isOwner && !isAdminUser) {
+            alert("Solo el propietario o un administrador pueden recuperar esta tarea.");
+            return;
+        }
+        
+        if (window.confirm("¿Estás seguro de que quieres recuperar esta tarea y todas sus subtareas?")) {
+            const tasksToRestore = getAllDescendants(taskId, allTasks);
+            const batch = writeBatch(db);
+            
+            tasksToRestore.forEach(t => {
+                const taskRef = doc(db, tasksCollectionPath, t.id);
+                batch.update(taskRef, { deleted: false });
+            });
+            
+            await batch.commit();
+        }
+    };
+
+    /**
+     * Obtiene todas las subtareas en cascada (incluyendo subtareas de subtareas).
+     *
+     * @param {string} taskId - ID de la tarea padre.
+     * @param {Array} tasks - Lista de todas las tareas.
+     * @returns {Array} Lista de tareas descendientes.
+     */
+    const getAllDescendants = (taskId, tasks) => {
+        const result = [];
+        const children = tasks.filter(t => t.parentId === taskId);
+        
+        children.forEach(child => {
+            result.push(child);
+            const grandchildren = getAllDescendants(child.id, tasks);
+            result.push(...grandchildren);
+        });
+        
+        return result;
+    };
+
+    /**
+     * Verifica si el usuario es owner de la tarea
+     */
+    const isTaskOwner = (task) => task?.ownerId === loggedInUser?.uid;
+    
+    const handleAssignTask = async (taskId, userId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { assigneeId: userId });
      * Asigna una tarea a un usuario específico.
      *
      * @param {string} taskId - ID de la tarea.
@@ -479,15 +548,15 @@ export default function App() {
                     {currentView !== 'my-workload' && currentTasks.length > 0 && canCreateSubtask(currentTasks[0]?.parentId ? allTasks.find(t => t.id === currentTasks[0].parentId) : { parentId: null }) && <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}</button>}
                 </div>
                 
-                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} canManageTeam={canManageTeam} />}
+                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onRestore={handleRestoreTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} canManageTeam={canManageTeam} isTaskOwner={isTaskOwner} />}
                 {currentView === 'kanban' && (
                     <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
-                        <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
-                        <BoardColumn title="En Progreso" tasks={tasksByStatus.inProgress} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
-                        <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} />
+                        <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} isTaskOwner={isTaskOwner} />
+                        <BoardColumn title="En Progreso" tasks={tasksByStatus.inProgress} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} isTaskOwner={isTaskOwner} />
+                        <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} isTaskOwner={isTaskOwner} />
                     </div>
                 )}
-                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
+                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onRestore={handleRestoreTask} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
 
             </main>
             {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} canManageTeam={canManageTeam} /></Modal>}

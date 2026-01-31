@@ -9,7 +9,7 @@ estimadas y permite gestión rápida.
 */
 
 import React, { useMemo, useState } from 'react';
-import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown } from 'lucide-react';
+import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown, Trash2, RotateCcw as RestoreIcon } from 'lucide-react';
 
 /**
  * Item de tarea en el dashboard de carga de trabajo.
@@ -24,11 +24,12 @@ import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, Rotat
  * @param {Function} props.onComplete - Función para completar.
  * @param {Function} props.onRevert - Función para revertir.
  * @param {Function} props.onEdit - Función para editar.
+ * @param {Function} props.onRestore - Función para restaurar.
  * @param {Object} props.loggedInUser - Usuario autenticado.
  * @param {Array} props.team - Lista de miembros.
  * @returns {JSX.Element} Item de tarea.
  */
-const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNavigate, onTake, onComplete, onRevert, onEdit, loggedInUser, team }) => {
+const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNavigate, onTake, onComplete, onRevert, onEdit, onRestore, loggedInUser, team }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const children = useMemo(() => allTasks.filter(t => t.parentId === task.id), [allTasks, task.id]);
     const aggregatedHours = useMemo(() => getAggregatedHours(task.id, allTasks), [task.id, allTasks, getAggregatedHours]);
@@ -41,6 +42,8 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
 
     const formatDate = (timestamp) => timestamp ? new Date(timestamp.seconds * 1000).toLocaleDateString() : 'N/A';
     const isAdmin = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
+    const isOwner = task.ownerId === loggedInUser.uid;
+    const canRestore = isAdmin || isOwner;
 
     const findTaskBreadcrumbs = (taskId, tasks) => {
         const tasksMap = new Map(tasks.map(t => [t.id, t]));
@@ -54,6 +57,35 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
     };
 
     const breadcrumbs = useMemo(() => findTaskBreadcrumbs(task.id, allTasks), [task.id, allTasks]);
+
+    if (task.deleted) {
+        return (
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg shadow-sm border border-red-300 dark:border-red-700 opacity-60" style={{ marginLeft: `${level * 1}rem` }}>
+                <div className="p-3 flex items-center justify-between">
+                    <div className="flex-grow">
+                        <div className="flex items-center text-xs text-gray-500 dark:text-gray-400 mb-2 flex-wrap">
+                            {breadcrumbs.map((crumb, index) => (
+                                <React.Fragment key={crumb.id}>
+                                    {index > 0 && <ChevronRight className="w-4 h-4 mx-1 flex-shrink-0" />}
+                                    <span className="text-gray-400">{crumb.title}</span>
+                                </React.Fragment>
+                            ))}
+                        </div>
+                        <p className="font-semibold text-gray-500 dark:text-gray-400 flex items-center">
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            {task.title}
+                        </p>
+                        <p className="text-xs text-gray-400 dark:text-gray-500">(Tarea borrada)</p>
+                    </div>
+                    {canRestore && (
+                        <button onClick={() => onRestore(task.id)} title="Restaurar tarea" className="p-2 text-gray-500 hover:text-green-600 dark:hover:text-green-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <RestoreIcon className="w-5 h-5" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={`bg-white dark:bg-gray-800 rounded-lg shadow-sm border ${isOverdue ? 'border-red-300 dark:border-red-700' : 'border-gray-200 dark:border-gray-700'}`} style={{ marginLeft: `${level * 1}rem` }}>
@@ -122,7 +154,7 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
                                 <WorkloadTaskItem 
                                     key={child.id} task={child} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
                                     level={0} onNavigate={onNavigate} onTake={onTake} onComplete={onComplete}
-                                    onRevert={onRevert} onEdit={onEdit} loggedInUser={loggedInUser} team={team}
+                                    onRevert={onRevert} onEdit={onEdit} onRestore={onRestore} loggedInUser={loggedInUser} team={team}
                                 />
                             ))}
                         </div>
@@ -147,13 +179,15 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
  * @param {Function} props.onComplete - Función para completar.
  * @param {Function} props.onRevert - Función para revertir.
  * @param {Function} props.onEdit - Función para editar.
+ * @param {Function} props.onRestore - Función para restaurar.
  * @param {Array} props.team - Lista de miembros.
  * @returns {JSX.Element} Dashboard de carga de trabajo.
  */
-export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, team }) {
+export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, onRestore, team }) {
     
     const myTasks = useMemo(() => {
         return allTasks.filter(task => 
+            !task.deleted &&
             (task.assigneeId === loggedInUser.uid || task.status === 'todo') && 
             task.status !== 'done'
         );
@@ -200,7 +234,7 @@ export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggrega
                     <WorkloadTaskItem 
                         key={task.id} task={task} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
                         onNavigate={onNavigate} onTake={onTake} onComplete={onComplete} onRevert={onRevert}
-                        onEdit={onEdit} loggedInUser={loggedInUser} team={team}
+                        onEdit={onEdit} onRestore={onRestore} loggedInUser={loggedInUser} team={team}
                     />
                 ))}
             </div>

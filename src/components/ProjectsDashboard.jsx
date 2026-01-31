@@ -9,7 +9,7 @@ de progreso, horas y estado.
 */
 
 import React, { useMemo } from 'react';
-import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2, Users } from 'lucide-react';
+import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2, Users, RotateCcw as RestoreIcon } from 'lucide-react';
 
 /**
  * Dashboard que muestra tarjetas de proyectos.
@@ -19,19 +19,24 @@ import { Edit, ExternalLink, Clock, TrendingUp, TrendingDown, Trash2, Users } fr
  * @param {Function} props.onNavigate - Función de navegación.
  * @param {Function} props.onEdit - Función para editar proyecto.
  * @param {Function} props.onDelete - Función para borrar proyecto.
+ * @param {Function} props.onRestore - Función para restaurar proyecto.
  * @param {Function} props.onManageTeam - Función para gestionar equipo.
  * @param {Object} props.loggedInUser - Usuario autenticado.
  * @param {Function} props.canManageTeam - Función para verificar si puede gestionar equipo.
+ * @param {Function} props.isTaskOwner - Función para verificar si es owner.
  * @returns {JSX.Element} Grid de proyectos.
  */
-export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDelete, onManageTeam, loggedInUser, canManageTeam }) {
+export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDelete, onRestore, onManageTeam, loggedInUser, canManageTeam, isTaskOwner }) {
     
-    const projects = useMemo(() => {
-        const activeTasks = allTasks.filter(task => !task.deleted);
-        const rootTasks = activeTasks.filter(task => task.parentId === null);
+    const deletedProjects = useMemo(() => {
+        return allTasks.filter(task => task.deleted && task.parentId === null);
+    }, [allTasks]);
+
+    const activeProjects = useMemo(() => {
+        const rootTasks = allTasks.filter(task => !task.deleted && task.parentId === null);
         
         return rootTasks.map(project => {
-            const children = activeTasks.filter(task => task.parentId === project.id);
+            const children = allTasks.filter(task => task.parentId === project.id && !task.deleted);
             let status = 'planned';
             let totalExpected = project.expectedHours || 0;
             let totalActual = project.actualHours || 0;
@@ -72,20 +77,24 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
         planned: 'bg-gray-100 dark:bg-gray-800 border-gray-300 dark:border-gray-600',
         inProgress: 'bg-sky-50 dark:bg-sky-900/50 border-sky-300 dark:border-sky-700',
         finished: 'bg-green-50 dark:bg-green-900/50 border-green-300 dark:border-green-700',
+        deleted: 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700 opacity-60',
     };
     
     const formatDate = (timestamp) => timestamp ? new Date(timestamp.seconds * 1000).toLocaleDateString() : 'N/A';
 
+    const isAdmin = loggedInUser?.role === 'admin' || loggedInUser?.role === 'superuser';
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {projects.length === 0 && (
+            {activeProjects.length === 0 && (
                 <div className="col-span-full text-center py-16 text-gray-500 dark:text-gray-400">
                     <p>No hay proyectos creados.</p>
                     <p>Usa el botón "+ Nuevo Proyecto" para empezar.</p>
                 </div>
             )}
-            {projects.map(project => {
+            {activeProjects.map(project => {
                 const canEdit = canManageTeam ? canManageTeam(project) : (project.ownerId === loggedInUser?.uid || project.team?.find(m => m.userId === loggedInUser?.uid)?.role === 'admin');
+                const isOwner = isTaskOwner ? isTaskOwner(project) : (project.ownerId === loggedInUser?.uid);
                 
                 return (
                 <div key={project.id} className={`p-4 rounded-lg shadow-md border ${statusStyles[project.status]} flex flex-col`}>
@@ -100,7 +109,7 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
                                 <button onClick={() => onManageTeam(project)} className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700" title="Gestionar equipo">
                                     <Users className="w-4 h-4"/>
                                 </button>
-                                {project.ownerId === loggedInUser?.uid && (
+                                {isOwner && (
                                 <button onClick={() => onDelete(project.id)} disabled={project.hasChildren} title={project.hasChildren ? "No se puede borrar, tiene subtareas" : "Borrar proyecto"} className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed">
                                     <Trash2 className="w-4 h-4"/>
                                 </button>
@@ -135,6 +144,35 @@ export default function ProjectsDashboard({ allTasks, onNavigate, onEdit, onDele
                     </div>
                 </div>
             )})}
+
+            {deletedProjects.length > 0 && (
+                <div className="col-span-full mt-8">
+                    <h3 className="text-lg font-bold text-gray-800 dark:text-white mb-4 flex items-center">
+                        <Trash2 className="w-5 h-5 mr-2 text-red-500" />
+                        Proyectos Borrados
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                        {deletedProjects.map(project => {
+                            const isOwner = isTaskOwner ? isTaskOwner(project) : (project.ownerId === loggedInUser?.uid);
+                            const canRestore = isAdmin || isOwner;
+
+                            return (
+                                <div key={project.id} className={`p-4 rounded-lg shadow-md border ${statusStyles.deleted} flex flex-col`}>
+                                    <div className="flex justify-between items-start">
+                                        <h3 className="font-bold text-xl text-gray-500 dark:text-gray-400">{project.title}</h3>
+                                        {canRestore && (
+                                            <button onClick={() => onRestore(project.id)} title="Restaurar proyecto" className="p-2 text-gray-500 hover:text-green-600 dark:hover:text-green-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                                                <RestoreIcon className="w-5 h-5" />
+                                            </button>
+                                        )}
+                                    </div>
+                                    <p className="text-gray-400 dark:text-gray-500 mt-1 text-sm flex-grow">(Proyecto borrado)</p>
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

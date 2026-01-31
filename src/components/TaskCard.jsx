@@ -12,7 +12,7 @@ Muestra información detallada de una tarea incluyendo:
 */
 
 import React, { useMemo } from 'react';
-import { Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, RotateCcw, Undo2, AlertCircle, TrendingUp, TrendingDown, ExternalLink, Trash2, Hourglass, Link } from 'lucide-react';
+import { Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, RotateCcw, Undo2, AlertCircle, TrendingUp, TrendingDown, ExternalLink, Trash2, Hourglass, Link, RotateCcw as RestoreIcon } from 'lucide-react';
 
 /**
  * Tarjeta de tarea para el tablero Kanban.
@@ -26,13 +26,15 @@ import { Clock, Calendar, Lock, Unlock, ArrowRight, Check, User, RotateCcw, Undo
  * @param {Function} props.onNavigate - Función para navegar a subtareas.
  * @param {Function} props.onAssign - Función para asignar.
  * @param {Function} props.onDelete - Función para borrar.
+ * @param {Function} props.onRestore - Función para restaurar.
  * @param {boolean} props.isLocked - Si la tarea está bloqueada.
  * @param {Object} props.loggedInUser - Usuario autenticado.
  * @param {Array} props.team - Lista de miembros.
  * @param {Array} props.allTasks - Todas las tareas.
+ * @param {Function} props.isTaskOwner - Función para verificar si es owner.
  * @returns {JSX.Element} Tarjeta de tarea.
  */
-export default function TaskCard({ task, onTake, onComplete, onRevert, onEdit, onNavigate, onAssign, onDelete, isLocked, loggedInUser, team, allTasks }) {
+export default function TaskCard({ task, onTake, onComplete, onRevert, onEdit, onNavigate, onAssign, onDelete, onRestore, isLocked, loggedInUser, team, allTasks, isTaskOwner }) {
     const assignee = task.assigneeId ? team.find(m => m.id === task.assigneeId) : null;
     const assigneeName = assignee ? assignee.username : 'Sin asignar';
     const deviation = task.status === 'done' ? (task.actualHours || 0) - (task.expectedHours || 0) : null;
@@ -46,13 +48,37 @@ export default function TaskCard({ task, onTake, onComplete, onRevert, onEdit, o
     };
 
     const isAdmin = loggedInUser.role === 'admin' || loggedInUser.role === 'superuser';
+    const canDelete = isTaskOwner ? isTaskOwner(task) : isAdmin;
+    const canRestore = isAdmin || (isTaskOwner && isTaskOwner(task));
     
     const cardBorderColor = () => {
+        if (task.deleted) return 'border-gray-400 opacity-50';
         if (task.taskType === 'linkingRequest') return 'border-purple-500';
         if (isLocked) return 'border-red-500 opacity-60';
         if (task.slack <= 0 && task.status !== 'done') return 'border-orange-500';
         return 'border-sky-500';
     };
+
+    if (task.deleted) {
+        return (
+            <div className={`bg-gray-100 dark:bg-gray-800 p-4 rounded-lg shadow-md border-l-4 ${cardBorderColor()} opacity-60`}>
+                <div className="flex justify-between items-center">
+                    <div>
+                        <h4 className="font-bold text-lg text-gray-500 dark:text-gray-400 flex items-center">
+                            <Trash2 className="w-5 h-5 mr-2" />
+                            {task.title}
+                        </h4>
+                        <p className="text-gray-400 dark:text-gray-500 mt-1 text-sm">(Tarea borrada)</p>
+                    </div>
+                    {canRestore && (
+                        <button onClick={() => onRestore(task.id)} title="Restaurar tarea" className="p-2 text-gray-500 hover:text-green-600 dark:hover:text-green-400 rounded-full hover:bg-gray-200 dark:hover:bg-gray-700">
+                            <RestoreIcon className="w-5 h-5" />
+                        </button>
+                    )}
+                </div>
+            </div>
+        );
+    }
 
     return (
         <div className={`bg-white dark:bg-gray-800 p-4 rounded-lg shadow-md border-l-4 ${cardBorderColor()} transition-shadow hover:shadow-lg`}>
@@ -109,9 +135,9 @@ export default function TaskCard({ task, onTake, onComplete, onRevert, onEdit, o
                     <button onClick={() => onNavigate(task)} title="Abrir tablero de subtareas" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700">
                         <ExternalLink className="w-4 h-4" />
                     </button>
-                    {isAdmin && <button onClick={() => onDelete(task.id)} disabled={hasChildren} title={hasChildren ? "No se puede borrar, tiene subtareas" : "Borrar tarea"} className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"><Trash2 className="w-4 h-4" /></button>}
-                    {isAdmin && task.status === 'inProgress' && <button onClick={() => onRevert(task.id, 'inProgress')} title="Devolver a Pendiente" className="p-2 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200 rounded-full hover:bg-yellow-100 dark:hover:bg-gray-700"><Undo2 className="w-4 h-4" /></button>}
-                    {isAdmin && task.status === 'done' && task.taskType !== 'linkedProject' && <button onClick={() => onRevert(task.id, 'done')} title="Reabrir Tarea" className="p-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 rounded-full hover:bg-red-100 dark:hover:bg-gray-700"><RotateCcw className="w-4 h-4" /></button>}
+                    {canDelete && <button onClick={() => onDelete(task.id)} disabled={hasChildren} title={hasChildren ? "No se puede borrar, tiene subtareas" : "Borrar tarea"} className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"><Trash2 className="w-4 h-4" /></button>}
+                    {canDelete && task.status === 'inProgress' && <button onClick={() => onRevert(task.id, 'inProgress')} title="Devolver a Pendiente" className="p-2 text-yellow-600 hover:text-yellow-800 dark:text-yellow-400 dark:hover:text-yellow-200 rounded-full hover:bg-yellow-100 dark:hover:bg-gray-700"><Undo2 className="w-4 h-4" /></button>}
+                    {canDelete && task.status === 'done' && task.taskType !== 'linkedProject' && <button onClick={() => onRevert(task.id, 'done')} title="Reabrir Tarea" className="p-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200 rounded-full hover:bg-red-100 dark:hover:bg-gray-700"><RotateCcw className="w-4 h-4" /></button>}
                     {task.status === 'todo' && !isLocked && <button onClick={() => onTake(task.id)} className="px-3 py-1 text-sm bg-green-500 text-white rounded-md hover:bg-green-600 flex items-center">Coger <ArrowRight className="w-4 h-4 ml-1" /></button>}
                     {task.status === 'inProgress' && task.assigneeId === loggedInUser.uid && <button onClick={() => onComplete(task)} className="px-3 py-1 text-sm bg-sky-500 text-white rounded-md hover:bg-sky-600 flex items-center">Completar <Check className="w-4 h-4 ml-1" /></button>}
                 </div>
