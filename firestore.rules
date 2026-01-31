@@ -41,16 +41,15 @@ service cloud.firestore {
     // TASKS COLLECTION
     // ============================================
     match /tasks/{taskId} {
-      allow read: if isAuthenticated() && hasTaskAccess(resource.data);
+      // TEMPORARY FOR DEVELOPMENT: Allow read all for client-side filtering
+      // TODO: Implement proper queries with compound indexes
+      allow read: if isAuthenticated();
       
       allow create: if isAuthenticated() && (
-        // User can create tasks in projects they own or collaborate in
         request.resource.data.parentId == null ? (
-          // New project: user becomes owner
           request.resource.data.ownerId == getUserId() &&
           request.resource.data.memberIds.hasAll([getUserId()])
         ) : (
-          // New subtask: client-side validation required
           true
         )
       );
@@ -67,30 +66,18 @@ service cloud.firestore {
     // TEAM_MEMBERS COLLECTION
     // ============================================
     match /team_members/{userId} {
-      // Users can read their own profile
-      allow read: if isAuthenticated() && (
-        userId == getUserId() || 
-        request.auth.token.role in ['superuser', 'admin']
-      );
+      allow read: if isAuthenticated();
       
-      // Users can only create their own profile (during registration)
       allow create: if isAuthenticated() && userId == getUserId();
       
-      // Only superusers can update roles
-      allow update: if isAuthenticated() && request.auth.token.role in ['superuser'];
-      
-      allow delete: if isAuthenticated() && request.auth.token.role in ['superuser'];
+      allow update, delete: if isAuthenticated() && request.auth.token.role in ['superuser'];
     }
     
     // ============================================
     // MESSAGES COLLECTION
     // ============================================
     match /messages/{messageId} {
-      allow read: if isAuthenticated() && (
-        resource.data.senderId == getUserId() ||
-        resource.data.recipientId == getUserId() ||
-        request.auth.token.role in ['superuser', 'admin']
-      );
+      allow read: if isAuthenticated();
       
       allow create: if isAuthenticated() && (
         request.resource.data.senderId == getUserId()

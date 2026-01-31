@@ -10,7 +10,7 @@ y vincular proyectos existentes.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { Edit, Plus, XCircle, User } from 'lucide-react';
+import { Edit, Plus, XCircle, User, Save } from 'lucide-react';
 
 /**
  * Formulario para crear o editar tareas/proyectos.
@@ -37,6 +37,9 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
     const [linkedProjectId, setLinkedProjectId] = useState('');
     const [assigneeId, setAssigneeId] = useState('');
 
+    const isEditing = !!taskToEdit;
+    const isNewProject = !isEditing && !parentId;
+
     const parentTask = useMemo(() => {
         if (!parentId) return null;
         return allTasks.find(t => t.id === parentId);
@@ -49,13 +52,6 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             return { id: userId, username: user?.username || 'Usuario desconocido', email: user?.email };
         }) || [];
     }, [parentTask, team]);
-
-    const isTaskOverdue = (task) => {
-        if (!task?.expirationDate) return false;
-        const now = new Date();
-        const expiration = new Date(task.expirationDate.seconds * 1000);
-        return expiration < now && task.status === 'todo';
-    };
 
     const getAncestors = (taskId, tasksMap) => {
         let ancestors = new Set();
@@ -128,15 +124,14 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         return current.title;
     };
 
-
     useEffect(() => {
         if (taskToEdit) {
-            setTitle(taskToEdit.title);
+            setTitle(taskToEdit.title || '');
             setDescription(taskToEdit.description || '');
             setPlannedStartDate(taskToEdit.plannedStartDate ? new Date(taskToEdit.plannedStartDate.seconds * 1000).toISOString().split('T')[0] : '');
             setExpirationDate(taskToEdit.expirationDate ? new Date(taskToEdit.expirationDate.seconds * 1000).toISOString().split('T')[0] : '');
             setDependencies(taskToEdit.dependencies || []);
-            setExpectedHours(taskToEdit.expectedHours || '');
+            setExpectedHours(taskToEdit.expectedHours ? String(taskToEdit.expectedHours) : '');
             setIsProject(taskToEdit.isProject || false);
             setAssigneeId(taskToEdit.assigneeId || '');
         }
@@ -180,99 +175,113 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
     const inputStyle = "w-full p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition";
 
     return (
-        <form onSubmit={handleSubmit} className="space-y-4">
-            <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center">
+        <form onSubmit={handleSubmit} className="space-y-4 max-h-[80vh] overflow-y-auto">
+            <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center sticky top-0 bg-white dark:bg-gray-800 pb-4 border-b border-gray-200 dark:border-gray-700 z-10">
                 <Edit className="w-6 h-6 mr-3 text-sky-500"/>
-                {taskToEdit ? 'Editar Tarea' : (parentId ? 'Nueva Subtarea' : 'Nuevo Proyecto')}
+                {isEditing ? 'Editar Tarea/Proyecto' : (parentId ? 'Nueva Subtarea' : 'Nuevo Proyecto')}
             </h2>
             
-            {!taskToEdit && (
-                <>
-                <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Título</label><input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputStyle} required /></div>
-                <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Descripción</label><textarea value={description} onChange={(e) => setDescription(e.target.value)} className={inputStyle} rows="3"></textarea></div>
-                {parentId === null && (
-                    <div className="flex items-center">
-                        <input id="isProject" type="checkbox" checked={isProject} onChange={(e) => setIsProject(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
-                        <label htmlFor="isProject" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Marcar como Proyecto</label>
-                    </div>
-                )}
-                
-                {parentId && availableCollaborators.length > 0 && (
-                    <div>
-                        <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center">
-                            <User className="w-4 h-4 mr-2" />
-                            Asignar a colaborador
-                        </label>
-                        <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputStyle}>
-                            <option value="">Sin asignar</option>
-                            {availableCollaborators.map(user => (
-                                <option key={user.id} value={user.id}>{user.username} ({user.email})</option>
-                            ))}
-                        </select>
-                        <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                            Solo puedes asignar a colaboradores del proyecto padre
-                        </p>
-                    </div>
-                )}
-                <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Horas Estimadas</label><input type="number" value={expectedHours} onChange={(e) => setExpectedHours(e.target.value)} className={inputStyle} placeholder="Ej: 8" /></div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Fecha de Inicio Prevista</label><input type="date" value={plannedStartDate} onChange={(e) => setPlannedStartDate(e.target.value)} className={inputStyle} /></div>
-                    <div><label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Fecha Límite</label><input type="date" value={expirationDate} onChange={(e) => setExpirationDate(e.target.value)} className={inputStyle} /></div>
+            {/* Campos principales - visibles siempre */}
+            <div>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Título</label>
+                <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} className={inputStyle} required />
+            </div>
+            
+            <div>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Descripción</label>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} className={inputStyle} rows="3"></textarea>
+            </div>
+
+            {/* Solo para nuevos proyectos (no subtareas) */}
+            {!isEditing && !parentId && (
+                <div className="flex items-center">
+                    <input id="isProject" type="checkbox" checked={isProject} onChange={(e) => setIsProject(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />
+                    <label htmlFor="isProject" className="ml-2 block text-sm text-gray-900 dark:text-gray-300">Marcar como Proyecto</label>
                 </div>
-                <div className="flex justify-end space-x-3 pt-4">
-                    <button type="button" onClick={onClose} className="px-4 py-2 rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 flex items-center"><Plus className="w-4 h-4 mr-2" />Crear Tarea</button>
+            )}
+            
+            {/* Selector de asignatario - visible en edición o nuevas subtareas */}
+            {(isEditing || parentId) && availableCollaborators.length > 0 && (
+                <div>
+                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center">
+                        <User className="w-4 h-4 mr-2" />
+                        Asignar a colaborador
+                    </label>
+                    <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputStyle}>
+                        <option value="">Sin asignar</option>
+                        {availableCollaborators.map(user => (
+                            <option key={user.id} value={user.id}>{user.username} ({user.email})</option>
+                        ))}
+                    </select>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                        Solo puedes asignar a colaboradores del proyecto padre
+                    </p>
                 </div>
-                <div className="relative my-4">
-                    <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-gray-300 dark:border-gray-600"></span></div>
-                    <div className="relative flex justify-center text-sm"><span className="px-2 bg-white dark:bg-gray-800 text-gray-500">O</span></div>
-                </div>
-                </>
             )}
 
             <div>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Horas Estimadas</label>
+                <input type="number" value={expectedHours} onChange={(e) => setExpectedHours(e.target.value)} className={inputStyle} placeholder="Ej: 8" />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Fecha de Inicio Prevista</label>
+                    <input type="date" value={plannedStartDate} onChange={(e) => setPlannedStartDate(e.target.value)} className={inputStyle} />
+                </div>
+                <div>
+                    <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Fecha Límite</label>
+                    <input type="date" value={expirationDate} onChange={(e) => setExpirationDate(e.target.value)} className={inputStyle} />
+                </div>
+            </div>
+
+            {/* Sección de dependencias - visible siempre */}
+            <div className="border-t pt-4 border-gray-200 dark:border-gray-700">
                 <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">
-                    {taskToEdit ? 'Dependencias' : 'Vincular un proyecto existente como subtarea'}
+                    {isEditing ? 'Dependencias' : 'Vincular un proyecto existente como subtarea'}
                 </label>
-                {taskToEdit && (
-                    <>
-                    <div className="p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 min-h-[6rem]">
-                        {dependencies.length === 0 ? <span className="text-sm text-gray-400">Ninguna dependencia añadida.</span> : (
-                            <div className="flex flex-wrap gap-2">
-                                {dependencies.map(depId => {
-                                    const depTask = allTasks.find(t => t.id === depId);
-                                    if (!depTask) return null;
-                                    const isCritical = depTask.slack <= 0;
-                                    return (
-                                        <span key={depId} className={`flex items-center gap-2 px-2 py-1 text-xs rounded-full ${isCritical ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200'}`}>
-                                            <span className="font-semibold">[{getProjectName(depId)}]</span>
-                                            {depTask.title}
-                                            <button type="button" onClick={() => handleRemoveDependency(depId)} className="hover:text-red-500"><XCircle className="w-4 h-4" /></button>
-                                        </span>
-                                    )
-                                })}
-                            </div>
-                        )}
-                    </div>
-                    <select onChange={handleAddDependency} value="" className={`${inputStyle} mt-2`}>
+                
+                <div className="p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 min-h-[6rem] mb-2">
+                    {dependencies.length === 0 ? (
+                        <span className="text-sm text-gray-400">Ninguna dependencia añadida.</span>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            {dependencies.map(depId => {
+                                const depTask = allTasks.find(t => t.id === depId);
+                                if (!depTask) return null;
+                                const isCritical = depTask.slack <= 0;
+                                return (
+                                    <span key={depId} className={`flex items-center gap-2 px-2 py-1 text-xs rounded-full ${isCritical ? 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200' : 'bg-sky-100 text-sky-800 dark:bg-sky-900 dark:text-sky-200'}`}>
+                                        <span className="font-semibold">[{getProjectName(depId)}]</span>
+                                        {depTask.title}
+                                        {isEditing && <button type="button" onClick={() => handleRemoveDependency(depId)} className="hover:text-red-500"><XCircle className="w-4 h-4" /></button>}
+                                    </span>
+                                )
+                            })}
+                        </div>
+                    )}
+                </div>
+
+                {isEditing ? (
+                    <select onChange={handleAddDependency} value="" className={inputStyle}>
                         <option value="" disabled>Añadir una dependencia...</option>
                         {availableDependencies.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
                     </select>
-                    </>
-                )}
-                {!taskToEdit && (
-                     <select onChange={handleLinkProjectSelect} value={linkedProjectId} className={`${inputStyle}`}>
+                ) : (
+                    <select onChange={handleLinkProjectSelect} value={linkedProjectId} className={inputStyle}>
                         <option value="" disabled>Seleccionar un proyecto para vincular...</option>
                         {linkableProjects.map(task => <option key={task.id} value={task.id}>{task.title}</option>)}
                     </select>
                 )}
             </div>
-            {taskToEdit && (
-                 <div className="flex justify-end space-x-3 pt-4">
-                    <button type="button" onClick={onClose} className="px-4 py-2 rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">Cancelar</button>
-                    <button type="submit" className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 flex items-center"><Plus className="w-4 h-4 mr-2" />Guardar Cambios</button>
-                </div>
-            )}
+
+            {/* Botones de acción */}
+            <div className="flex justify-end space-x-3 pt-4 border-t border-gray-200 dark:border-gray-700 sticky bottom-0 bg-white dark:bg-gray-800">
+                <button type="button" onClick={onClose} className="px-4 py-2 rounded-md bg-gray-200 text-gray-800 hover:bg-gray-300 dark:bg-gray-600 dark:text-gray-200 dark:hover:bg-gray-500">Cancelar</button>
+                <button type="submit" className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 flex items-center">
+                    {isEditing ? <><Save className="w-4 h-4 mr-2" />Guardar Cambios</> : <><Plus className="w-4 h-4 mr-2" />Crear</>}
+                </button>
+            </div>
         </form>
     );
 };
