@@ -477,7 +477,7 @@ export default function App() {
      */
     const isTaskOwner = (task) => task?.ownerId === loggedInUser?.uid;
     
-    const handleAssignTask = async (taskId, userId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { assigneeId: userId });
+    /**
      * Asigna una tarea a un usuario específico.
      *
      * @param {string} taskId - ID de la tarea.
