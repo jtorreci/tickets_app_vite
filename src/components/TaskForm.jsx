@@ -10,7 +10,7 @@ y vincular proyectos existentes.
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Timestamp } from 'firebase/firestore';
-import { Edit, Plus, XCircle, User, Save } from 'lucide-react';
+import { Edit, Plus, XCircle, User, Save, Link, Trash2, ExternalLink } from 'lucide-react';
 
 /**
  * Formulario para crear o editar tareas/proyectos.
@@ -21,7 +21,7 @@ import { Edit, Plus, XCircle, User, Save } from 'lucide-react';
  * @param {Function} props.onClose - Función para cerrar el modal.
  * @param {Array} props.allTasks - Lista de todas las tareas.
  * @param {Object} props.taskToEdit - Tarea a editar (null para nueva).
- * @param {string} props.parentId - ID del padre (para subtareas).
+ * @param {string} props.parentId - ID del padre (para subtareas, 'inbox' para bandeja de entrada).
  * @param {Object} props.loggedInUser - Usuario autenticado.
  * @param {Array} props.team - Lista de todos los usuarios.
  * @returns {JSX.Element} Formulario de tarea.
@@ -29,6 +29,9 @@ import { Edit, Plus, XCircle, User, Save } from 'lucide-react';
 export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, taskToEdit, parentId = null, loggedInUser, team }) {
     const [title, setTitle] = useState('');
     const [description, setDescription] = useState('');
+    const [notes, setNotes] = useState('');
+    const [links, setLinks] = useState([]);
+    const [newLink, setNewLink] = useState({ title: '', url: '' });
     const [plannedStartDate, setPlannedStartDate] = useState('');
     const [expirationDate, setExpirationDate] = useState('');
     const [dependencies, setDependencies] = useState([]);
@@ -38,10 +41,11 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
     const [assigneeId, setAssigneeId] = useState('');
 
     const isEditing = !!taskToEdit;
-    const isNewProject = !isEditing && !parentId;
+    const isNewProject = !isEditing && !parentId && parentId !== 'inbox';
+    const isInbox = !isEditing && parentId === 'inbox';
 
     const parentTask = useMemo(() => {
-        if (!parentId) return null;
+        if (!parentId || parentId === 'inbox') return null;
         return allTasks.find(t => t.id === parentId);
     }, [parentId, allTasks]);
 
@@ -128,6 +132,8 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         if (taskToEdit) {
             setTitle(taskToEdit.title || '');
             setDescription(taskToEdit.description || '');
+            setNotes(taskToEdit.notes || '');
+            setLinks(taskToEdit.links || []);
             setPlannedStartDate(taskToEdit.plannedStartDate ? new Date(taskToEdit.plannedStartDate.seconds * 1000).toISOString().split('T')[0] : '');
             setExpirationDate(taskToEdit.expirationDate ? new Date(taskToEdit.expirationDate.seconds * 1000).toISOString().split('T')[0] : '');
             setDependencies(taskToEdit.dependencies || []);
@@ -137,17 +143,30 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         }
     }, [taskToEdit]);
 
+    const handleAddLink = () => {
+        if (newLink.title && newLink.url) {
+            setLinks([...links, { ...newLink, id: Date.now().toString() }]);
+            setNewLink({ title: '', url: '' });
+        }
+    };
+
+    const handleRemoveLink = (linkId) => {
+        setLinks(links.filter(l => l.id !== linkId));
+    };
+
     const handleSubmit = (e) => {
         e.preventDefault();
         onSave({ 
             title, 
             description, 
-            plannedStartDate: plannedStartDate ? Timestamp.fromDate(new Date(plannedStartDate)) : null, 
+            notes,
+            links,
+            plannedDate: plannedStartDate ? Timestamp.fromDate(new Date(plannedStartDate)) : null, 
             expirationDate: expirationDate ? Timestamp.fromDate(new Date(expirationDate)) : null, 
             dependencies,
             expectedHours: Number(expectedHours) || 0,
-            parentId,
-            isProject: parentId === null ? isProject : false,
+            parentId: parentId === 'inbox' ? null : parentId,
+            isProject: isInbox ? false : (parentId === null ? isProject : false),
             assigneeId: assigneeId || null
         });
     };
@@ -178,7 +197,7 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         <form onSubmit={handleSubmit} className="space-y-4 max-h-[80vh] overflow-y-auto">
             <h2 className="text-2xl font-bold text-gray-800 dark:text-white flex items-center sticky top-0 bg-white dark:bg-gray-800 pb-4 border-b border-gray-200 dark:border-gray-700 z-10">
                 <Edit className="w-6 h-6 mr-3 text-sky-500"/>
-                {isEditing ? 'Editar Tarea/Proyecto' : (parentId ? 'Nueva Subtarea' : 'Nuevo Proyecto')}
+                {isEditing ? 'Editar Tarea/Proyecto' : (isInbox ? 'Nueva Tarea' : parentId ? 'Nueva Subtarea' : 'Nuevo Proyecto')}
             </h2>
             
             {/* Campos principales - visibles siempre */}
@@ -189,10 +208,78 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
             
             <div>
                 <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Descripción</label>
-                <textarea value={description} onChange={(e) => setDescription(e.target.value)} className={inputStyle} rows="3"></textarea>
+                <textarea value={description} onChange={(e) => setDescription(e.target.value)} className={inputStyle} rows="2"></textarea>
             </div>
 
-            {/* Solo para nuevos proyectos (no subtareas) */}
+            {/* Campo de Notas */}
+            <div>
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center">
+                    <Edit className="w-4 h-4 mr-2" />
+                    Notas
+                </label>
+                <textarea 
+                    value={notes} 
+                    onChange={(e) => setNotes(e.target.value)} 
+                    className={inputStyle} 
+                    rows="4" 
+                    placeholder="Añade notas, observaciones, o información adicional..."
+                ></textarea>
+            </div>
+
+            {/* Campo de Enlaces */}
+            <div className="border-t pt-4 border-gray-200 dark:border-gray-700">
+                <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-2 flex items-center">
+                    <Link className="w-4 h-4 mr-2" />
+                    Enlaces y Recursos
+                </label>
+                
+                {/* Lista de enlaces */}
+                {links.length > 0 && (
+                    <div className="space-y-2 mb-4">
+                        {links.map(link => (
+                            <div key={link.id} className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700 rounded-md">
+                                <a href={link.url} target="_blank" rel="noopener noreferrer" className="text-sky-500 hover:text-sky-600 dark:text-sky-400 flex items-center">
+                                    <ExternalLink className="w-4 h-4 mr-2" />
+                                    {link.title}
+                                </a>
+                                <button onClick={() => handleRemoveLink(link.id)} className="text-gray-400 hover:text-red-500">
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                )}
+                
+                {/* Añadir nuevo enlace */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <input 
+                        type="text" 
+                        value={newLink.title} 
+                        onChange={(e) => setNewLink({ ...newLink, title: e.target.value })} 
+                        className={inputStyle} 
+                        placeholder="Título del enlace"
+                    />
+                    <div className="flex gap-2">
+                        <input 
+                            type="url" 
+                            value={newLink.url} 
+                            onChange={(e) => setNewLink({ ...newLink, url: e.target.value })} 
+                            className={inputStyle} 
+                            placeholder="https://..."
+                        />
+                        <button 
+                            type="button" 
+                            onClick={handleAddLink}
+                            disabled={!newLink.title || !newLink.url}
+                            className="px-3 py-2 bg-sky-500 text-white rounded-md hover:bg-sky-600 disabled:bg-gray-400 disabled:cursor-not-allowed"
+                        >
+                            <Plus className="w-4 h-4" />
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            {/* Solo para nuevos proyectos (no subtareas ni inbox) */}
             {!isEditing && !parentId && (
                 <div className="flex items-center">
                     <input id="isProject" type="checkbox" checked={isProject} onChange={(e) => setIsProject(e.target.checked)} className="h-4 w-4 rounded border-gray-300 text-sky-600 focus:ring-sky-500" />

@@ -18,6 +18,7 @@ import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react
 // --- Componentes de la aplicación ---
 import AuthScreen from './components/AuthScreen';
 import BoardColumn from './components/BoardColumn';
+import InboxDashboard from './components/InboxDashboard';
 import Modal from './components/Modal';
 import Spinner from './components/Spinner';
 import TaskForm from './components/TaskForm';
@@ -72,6 +73,15 @@ export default function App() {
         return activeTasks.filter(task => 
             task.isProject && 
             (task.ownerId === loggedInUser.uid || task.memberIds?.includes(loggedInUser.uid))
+        );
+    }, [activeTasks, loggedInUser]);
+    
+    const inboxTasks = useMemo(() => {
+        if (!loggedInUser) return [];
+        return activeTasks.filter(task => 
+            !task.isProject && 
+            !task.parentId &&
+            (task.ownerId === loggedInUser.uid || task.assigneeId === loggedInUser.uid)
         );
     }, [activeTasks, loggedInUser]);
 
@@ -525,7 +535,12 @@ export default function App() {
                 <div className="font-bold text-xl text-sky-600 dark:text-sky-400">Synaptic Flow</div>
                 <div className="flex items-center space-x-4">
                     <button onClick={navigateToDashboard} title="Ver Proyectos" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Home className="w-5 h-5"/></button>
-                    <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 relative">
+                    <button onClick={() => setCurrentView('inbox')} title="Bandeja de Entrada" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'inbox' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500'}`}>
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v6m16 0v6a2 2 0 01-2 2H6a2 2 0 01-2-2v-6m16 0h-4.5a2 2 0 01-2-2v-2.5M4 13h16M8 21h8" />
+                        </svg>
+                    </button>
+                    <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'my-workload' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500'} relative`}>
                         <Briefcase className="w-5 h-5"/>
                         {messages.length > 0 && <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>}
                     </button>
@@ -544,11 +559,12 @@ export default function App() {
                                 </button>
                             </React.Fragment>
                         ))}
+                        {currentView === 'inbox' && <span className="text-gray-800 dark:text-white font-semibold">📥 Bandeja de Entrada</span>}
                     </nav>
                     {currentView !== 'my-workload' && (
                         <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center">
                             <Plus className="w-5 h-5 mr-2" /> 
-                            {currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}
+                            {currentView === 'inbox' ? 'Nueva Tarea' : currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}
                         </button>
                     )}
                 </div>
@@ -561,6 +577,7 @@ export default function App() {
                         <BoardColumn title="Hecho" tasks={tasksByStatus.done} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} isTaskOwner={isTaskOwner} />
                     </div>
                 )}
+                {currentView === 'inbox' && <InboxDashboard tasks={inboxTasks} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onRestore={handleRestoreTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} loggedInUser={loggedInUser} team={team} />}
                 {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onRestore={handleRestoreTask} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
 
             </main>
