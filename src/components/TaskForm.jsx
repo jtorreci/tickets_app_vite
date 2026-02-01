@@ -57,6 +57,14 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
         }) || [];
     }, [parentTask, team]);
 
+    const availableTeamMembers = useMemo(() => {
+        return team?.map(user => ({
+            id: user.id,
+            username: user.username || 'Usuario desconocido',
+            email: user.email
+        })) || [];
+    }, [team]);
+
     const getAncestors = (taskId, tasksMap) => {
         let ancestors = new Set();
         if (!taskId) return ancestors;
@@ -287,22 +295,19 @@ export default function TaskForm({ onSave, onLinkProject, onClose, allTasks, tas
                 </div>
             )}
             
-            {/* Selector de asignatario - visible en edición o nuevas subtareas */}
-            {(isEditing || parentId) && availableCollaborators.length > 0 && (
+            {/* Selector de asignatario - visible siempre */}
+            {availableTeamMembers.length > 0 && (
                 <div>
                     <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1 flex items-center">
                         <User className="w-4 h-4 mr-2" />
-                        Asignar a colaborador
+                        Asignar a usuario
                     </label>
                     <select value={assigneeId} onChange={(e) => setAssigneeId(e.target.value)} className={inputStyle}>
                         <option value="">Sin asignar</option>
-                        {availableCollaborators.map(user => (
+                        {availableTeamMembers.map(user => (
                             <option key={user.id} value={user.id}>{user.username} ({user.email})</option>
                         ))}
                     </select>
-                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                        Solo puedes asignar a colaboradores del proyecto padre
-                    </p>
                 </div>
             )}
 
