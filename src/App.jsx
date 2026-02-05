@@ -18,6 +18,7 @@ import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react
 // --- Componentes de la aplicación ---
 import AuthScreen from './components/AuthScreen';
 import BoardColumn from './components/BoardColumn';
+import DashboardSplit from './components/DashboardSplit';
 import InboxDashboard from './components/InboxDashboard';
 import Modal from './components/Modal';
 import Spinner from './components/Spinner';
@@ -373,7 +374,34 @@ export default function App() {
      *
      * @param {string} taskId - ID de la tarea a tomar.
      */
-    const handleTakeTask = async (taskId) => await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() });
+    const handleTakeTask = async (taskId) => {
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        const previousStatus = task.status;
+        const previousAssignee = task.assigneeId;
+
+        setAllTasks(prev => prev.map(t =>
+            t.id === taskId
+                ? { ...t, status: 'inProgress', assigneeId: loggedInUser.uid, startedAt: Timestamp.now() }
+                : t
+        ));
+
+        try {
+            await updateDoc(doc(db, tasksCollectionPath, taskId), {
+                status: 'inProgress',
+                assigneeId: loggedInUser.uid,
+                startedAt: Timestamp.now()
+            });
+        } catch (error) {
+            console.error("Error al tomar la tarea:", error);
+            setAllTasks(prev => prev.map(t =>
+                t.id === taskId
+                    ? { ...t, status: previousStatus, assigneeId: previousAssignee }
+                    : t
+            ));
+        }
+    };
 
     /**
      * Registra horas trabajadas y marca la tarea como completada.
@@ -382,12 +410,25 @@ export default function App() {
      */
     const handleLogHoursAndComplete = async (actualHours) => {
         if (!taskToLogHours) return;
+        const taskId = taskToLogHours.id;
+        const previousStatus = taskToLogHours.status;
+
+        setAllTasks(prev => prev.map(t =>
+            t.id === taskId
+                ? { ...t, status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null }
+                : t
+        ));
+        setTaskToLogHours(null);
+
         try {
-            await updateDoc(doc(db, tasksCollectionPath, taskToLogHours.id), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
+            await updateDoc(doc(db, tasksCollectionPath, taskId), { status: 'done', completedAt: Timestamp.now(), actualHours, startedAt: null });
         } catch (error) {
             console.error("Error al completar la tarea:", error);
-        } finally {
-            setTaskToLogHours(null);
+            setAllTasks(prev => prev.map(t =>
+                t.id === taskId
+                    ? { ...t, status: previousStatus }
+                    : t
+            ));
         }
     };
     
@@ -398,9 +439,40 @@ export default function App() {
      * @param {string} currentStatus - Estado actual de la tarea.
      */
     const handleRevertTask = async (taskId, currentStatus) => {
-        const taskRef = doc(db, tasksCollectionPath, taskId);
-        if (currentStatus === 'inProgress') await updateDoc(taskRef, { status: 'todo', assigneeId: null, startedAt: null });
-        else if (currentStatus === 'done') await updateDoc(taskRef, { status: 'inProgress', completedAt: null, startedAt: Timestamp.now(), actualHours: 0 });
+        const task = allTasks.find(t => t.id === taskId);
+        if (!task) return;
+
+        let newStatus, newAssigneeId, newStartedAt, newCompletedAt, newActualHours;
+        if (currentStatus === 'inProgress') {
+            newStatus = 'todo';
+            newAssigneeId = null;
+            newStartedAt = null;
+        } else if (currentStatus === 'done') {
+            newStatus = 'inProgress';
+            newCompletedAt = null;
+            newStartedAt = Timestamp.now();
+            newActualHours = 0;
+        }
+
+        setAllTasks(prev => prev.map(t =>
+            t.id === taskId
+                ? { ...t, status: newStatus, assigneeId: newAssigneeId, startedAt: newStartedAt, completedAt: newCompletedAt, actualHours: newActualHours }
+                : t
+        ));
+
+        try {
+            const updates = { status: newStatus };
+            if (newAssigneeId !== undefined) updates.assigneeId = newAssigneeId;
+            if (newStartedAt !== undefined) updates.startedAt = newStartedAt;
+            if (newCompletedAt !== undefined) updates.completedAt = newCompletedAt;
+            if (newActualHours !== undefined) updates.actualHours = newActualHours;
+            await updateDoc(doc(db, tasksCollectionPath, taskId), updates);
+        } catch (error) {
+            console.error("Error al revertir la tarea:", error);
+            setAllTasks(prev => prev.map(t =>
+                t.id === taskId ? task : t
+            ));
+        }
     };
 
     /**
@@ -569,7 +641,28 @@ export default function App() {
                     )}
                 </div>
                 
-                {currentView === 'dashboard' && <ProjectsDashboard projects={userProjects} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onRestore={handleRestoreTask} onManageTeam={openTeamModal} loggedInUser={loggedInUser} canManageTeam={canManageTeam} isTaskOwner={isTaskOwner} />}
+                {currentView === 'dashboard' && (
+                    <DashboardSplit
+                        projects={userProjects}
+                        allTasks={allTasks}
+                        onNavigate={navigateToTask}
+                        onEdit={openTaskModal}
+                        onDelete={handleDeleteTask}
+                        onRestore={handleRestoreTask}
+                        onManageTeam={openTeamModal}
+                        onCreateSubtask={(parentId) => { setCurrentParentId(parentId); openTaskModal(); }}
+                        loggedInUser={loggedInUser}
+                        canManageTeam={canManageTeam}
+                        inboxTasks={inboxTasks}
+                        onEditTask={openTaskModal}
+                        onDeleteTask={handleDeleteTask}
+                        onRestoreTask={handleRestoreTask}
+                        onTakeTask={handleTakeTask}
+                        onCompleteTask={setTaskToLogHours}
+                        onRevertTask={handleRevertTask}
+                        team={team}
+                    />
+                )}
                 {currentView === 'kanban' && (
                     <div className="flex-grow flex flex-col md:flex-row gap-6 overflow-x-auto pb-4 h-full">
                         <BoardColumn title="Pendiente" tasks={tasksByStatus.todo} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEditTicket={openTaskModal} onAssign={handleAssignTask} onDelete={handleDeleteTask} allTasks={activeTasks} loggedInUser={loggedInUser} team={team} onNavigate={navigateToTask} isTaskOwner={isTaskOwner} />

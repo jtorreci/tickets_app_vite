@@ -9,7 +9,7 @@ el equipo de un proyecto.
 */
 
 import React, { useState } from 'react';
-import { collection, query, where, getDocs, doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { Users, XCircle } from 'lucide-react';
 import Spinner from './Spinner';
 
@@ -26,7 +26,7 @@ import Spinner from './Spinner';
  * @returns {JSX.Element} Panel de gestión de equipo.
  */
 export default function TeamManagement({ project, allUsers, db, tasksCollectionPath, loggedInUser, onClose, canManageTeam }) {
-    const [inviteEmail, setInviteEmail] = useState('');
+    const [selectedUserId, setSelectedUserId] = useState('');
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
 
@@ -34,37 +34,28 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
     const isProjectAdmin = project.team?.find(m => m.userId === loggedInUser?.uid)?.role === 'admin';
     const canManage = canManageTeam ? canManageTeam(project) : (isProjectOwner || isProjectAdmin);
 
+    const availableUsers = allUsers?.filter(user => !project.memberIds?.includes(user.id)) || [];
+
     const handleInvite = async (e) => {
         e.preventDefault();
-        if (!canManage) return;
-        
+        if (!canManage || !selectedUserId) return;
+
         setError('');
         setIsLoading(true);
         try {
-            const q = query(collection(db, "team_members"), where("email", "==", inviteEmail));
-            const querySnapshot = await getDocs(q);
-            
-            if (querySnapshot.empty) {
-                setError("No se ha encontrado ningún usuario con ese email.");
+            const userToAdd = allUsers.find(u => u.id === selectedUserId);
+            if (!userToAdd) {
+                setError("Usuario no encontrado.");
                 setIsLoading(false);
                 return;
             }
 
-            const userDoc = querySnapshot.docs[0];
-            const userId = userDoc.id;
-
-            if (project.memberIds?.includes(userId)) {
-                 setError("Este usuario ya es miembro del proyecto.");
-                 setIsLoading(false);
-                 return;
-            }
-
             const projectRef = doc(db, tasksCollectionPath, project.id);
             await updateDoc(projectRef, {
-                team: arrayUnion({ userId: userId, role: 'member' }),
-                memberIds: arrayUnion(userId)
+                team: arrayUnion({ userId: selectedUserId, role: 'member' }),
+                memberIds: arrayUnion(selectedUserId)
             });
-            setInviteEmail('');
+            setSelectedUserId('');
 
         } catch (err) {
             setError("Error al invitar al usuario.");
@@ -147,13 +138,30 @@ export default function TeamManagement({ project, allUsers, db, tasksCollectionP
                     <h3 className="text-lg font-semibold text-gray-700 dark:text-gray-200">Invitar a un miembro</h3>
                     {error && <p className="text-sm text-red-500">{error}</p>}
                     <div>
-                        <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Email del usuario</label>
+                        <label className="block text-sm font-medium text-gray-600 dark:text-gray-300 mb-1">Seleccionar usuario</label>
                         <div className="flex gap-2">
-                            <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition" required />
-                            <button type="submit" disabled={isLoading} className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 disabled:bg-sky-300">
+                            <select
+                                value={selectedUserId}
+                                onChange={(e) => setSelectedUserId(e.target.value)}
+                                className="flex-grow p-2 border border-gray-300 dark:border-gray-600 rounded-md bg-gray-50 dark:bg-gray-700 focus:ring-2 focus:ring-sky-500 focus:border-sky-500 transition"
+                                required
+                            >
+                                <option value="">Seleccionar usuario...</option>
+                                {availableUsers.map(user => (
+                                    <option key={user.id} value={user.id}>
+                                        {user.username} ({user.email})
+                                    </option>
+                                ))}
+                            </select>
+                            <button type="submit" disabled={isLoading || !selectedUserId} className="px-4 py-2 rounded-md bg-sky-500 text-white hover:bg-sky-600 disabled:bg-sky-300">
                                 {isLoading ? <Spinner /> : "Invitar"}
                             </button>
                         </div>
+                        {availableUsers.length === 0 && (
+                            <p className="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                                No hay usuarios disponibles para invitar.
+                            </p>
+                        )}
                     </div>
                 </form>
             ) : (
