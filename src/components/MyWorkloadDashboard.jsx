@@ -1,34 +1,17 @@
 /*
 Dashboard de carga de trabajo personal para Synaptic Flow.
 
-Muestra las tareas asignadas al usuario con sus horas
-estimadas y permite gestión rápida.
+Muestra las tareas asignadas al usuario agrupadas por equipo,
+con horas estimadas y gestión rápida.
 
 @module MyWorkloadDashboard
 @component
 */
 
 import React, { useMemo, useState } from 'react';
-import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown, Trash2, RotateCcw as RestoreIcon } from 'lucide-react';
+import { Clock, AlertCircle, ChevronRight, Edit, Check, ArrowRight, Undo2, RotateCcw, ChevronDown, Trash2, RotateCcw as RestoreIcon, Users } from 'lucide-react';
+import InvitationsPanel from './InvitationsPanel';
 
-/**
- * Item de tarea en el dashboard de carga de trabajo.
- *
- * @param {Object} props - Propiedades del componente.
- * @param {Object} props.task - Tarea a mostrar.
- * @param {Array} props.allTasks - Todas las tareas.
- * @param {Function} props.getAggregatedHours - Función para calcular horas.
- * @param {number} props.level - Nivel de anidamiento.
- * @param {Function} props.onNavigate - Función de navegación.
- * @param {Function} props.onTake - Función para tomar tarea.
- * @param {Function} props.onComplete - Función para completar.
- * @param {Function} props.onRevert - Función para revertir.
- * @param {Function} props.onEdit - Función para editar.
- * @param {Function} props.onRestore - Función para restaurar.
- * @param {Object} props.loggedInUser - Usuario autenticado.
- * @param {Array} props.team - Lista de miembros.
- * @returns {JSX.Element} Item de tarea.
- */
 const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNavigate, onTake, onComplete, onRevert, onEdit, onRestore, loggedInUser, team }) => {
     const [isExpanded, setIsExpanded] = useState(false);
     const children = useMemo(() => allTasks.filter(t => t.parentId === task.id), [allTasks, task.id]);
@@ -151,7 +134,7 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
                     {isExpanded && (
                         <div className="p-2 space-y-2">
                             {children.map(child => (
-                                <WorkloadTaskItem 
+                                <WorkloadTaskItem
                                     key={child.id} task={child} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
                                     level={0} onNavigate={onNavigate} onTake={onTake} onComplete={onComplete}
                                     onRevert={onRevert} onEdit={onEdit} onRestore={onRestore} loggedInUser={loggedInUser} team={team}
@@ -166,29 +149,12 @@ const WorkloadTaskItem = ({ task, allTasks, getAggregatedHours, level = 0, onNav
 };
 
 
-/**
- * Dashboard de carga de trabajo personal.
- * Muestra todas las tareas asignadas al usuario con horas acumuladas.
- *
- * @param {Object} props - Propiedades del componente.
- * @param {Array} props.allTasks - Todas las tareas del sistema.
- * @param {Object} props.loggedInUser - Usuario autenticado.
- * @param {Function} props.getAggregatedHours - Función para calcular horas.
- * @param {Function} props.onNavigate - Función de navegación.
- * @param {Function} props.onTake - Función para tomar tarea.
- * @param {Function} props.onComplete - Función para completar.
- * @param {Function} props.onRevert - Función para revertir.
- * @param {Function} props.onEdit - Función para editar.
- * @param {Function} props.onRestore - Función para restaurar.
- * @param {Array} props.team - Lista de miembros.
- * @returns {JSX.Element} Dashboard de carga de trabajo.
- */
-export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, onRestore, team }) {
-    
+export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggregatedHours, onNavigate, onTake, onComplete, onRevert, onEdit, onRestore, team, messages, onApproveLink, onDeclineLink, userTeams = [], pendingInvitations = [], onAcceptInvitation, onDeclineInvitation }) {
+
     const myTasks = useMemo(() => {
-        return allTasks.filter(task => 
+        return allTasks.filter(task =>
             !task.deleted &&
-            (task.assigneeId === loggedInUser.uid || task.status === 'todo') && 
+            (task.assigneeId === loggedInUser.uid || task.status === 'todo') &&
             task.status !== 'done'
         );
     }, [allTasks, loggedInUser.uid]);
@@ -198,46 +164,103 @@ export default function MyWorkloadDashboard({ allTasks, loggedInUser, getAggrega
         return myTasks.filter(task => !task.parentId || !myTaskIds.has(task.parentId));
     }, [myTasks]);
 
+    // Agrupar tareas por equipo
+    const groupedByTeam = useMemo(() => {
+        const groups = new Map();
+        groups.set(null, { team: null, teamName: 'Proyectos Personales', tasks: [] });
+        userTeams.forEach(t => {
+            groups.set(t.id, { team: t, teamName: t.name, tasks: [] });
+        });
+
+        rootMyTasks.forEach(task => {
+            const teamId = task.teamId || null;
+            if (groups.has(teamId)) {
+                groups.get(teamId).tasks.push(task);
+            } else {
+                groups.get(null).tasks.push(task);
+            }
+        });
+
+        const result = [];
+        userTeams.forEach(t => {
+            const group = groups.get(t.id);
+            if (group.tasks.length > 0) result.push(group);
+        });
+        const personal = groups.get(null);
+        if (personal.tasks.length > 0) result.push(personal);
+        return result;
+    }, [rootMyTasks, userTeams]);
+
     const totalHours = useMemo(() => {
         return rootMyTasks.reduce((sum, task) => sum + getAggregatedHours(task.id, allTasks), 0);
     }, [rootMyTasks, allTasks, getAggregatedHours]);
 
     const overdueTasks = useMemo(() => {
         const now = new Date();
-        return rootMyTasks.filter(task => 
-            task.status === 'todo' && 
-            task.expirationDate && 
+        return rootMyTasks.filter(task =>
+            task.status === 'todo' &&
+            task.expirationDate &&
             new Date(task.expirationDate.seconds * 1000) < now
         );
     }, [rootMyTasks]);
-    
+
     return (
         <div className="max-w-5xl mx-auto">
+            <InvitationsPanel invitations={pendingInvitations} onAccept={onAcceptInvitation} onDecline={onDeclineInvitation} />
+
+            {/* Solicitudes de vinculación pendientes */}
+            {messages && messages.length > 0 && (
+                <div className="mb-6 p-4 bg-purple-50 dark:bg-purple-900/30 rounded-lg border border-purple-200 dark:border-purple-800">
+                    <h3 className="text-lg font-semibold text-purple-700 dark:text-purple-300 mb-3">Solicitudes de vinculación</h3>
+                    {messages.map(msg => (
+                        <div key={msg.id} className="flex items-center justify-between p-3 bg-white dark:bg-gray-800 rounded-md shadow-sm mb-2">
+                            <div>
+                                <p className="text-sm"><span className="font-semibold">{msg.senderName}</span> quiere vincular "<span className="font-semibold">{msg.data?.projectToLinkName}</span>" a "<span className="font-semibold">{msg.data?.parentProjectName}</span>"</p>
+                            </div>
+                            <div className="flex space-x-2">
+                                <button onClick={() => onApproveLink(msg)} className="px-3 py-1 text-sm bg-green-500 text-white rounded-md hover:bg-green-600">Aprobar</button>
+                                <button onClick={() => onDeclineLink(msg.id)} className="px-3 py-1 text-sm bg-red-500 text-white rounded-md hover:bg-red-600">Rechazar</button>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+
             <div className="p-4 bg-white dark:bg-gray-800 rounded-lg shadow-md mb-6">
                 <h2 className="text-2xl font-bold text-gray-900 dark:text-white">Mi Carga de Trabajo</h2>
                 <p className="text-gray-600 dark:text-gray-400">Total de horas estimadas (pendientes y en progreso): <span className="font-bold text-sky-600 dark:text-sky-400 text-lg">{totalHours.toFixed(1)}h</span></p>
                 {overdueTasks.length > 0 && (
                     <p className="text-red-600 dark:text-red-400 mt-2">
-                        ⚠️ Tienes {overdueTasks.length} tarea(s) vencida(s) que requieren atención
+                        Tienes {overdueTasks.length} tarea(s) vencida(s) que requieren atención
                     </p>
                 )}
             </div>
 
-            <div className="space-y-2">
-                {rootMyTasks.length === 0 && (
-                    <div className="text-center py-16 text-gray-500 dark:text-gray-400">
-                        <p>No tienes tareas asignadas.</p>
-                        <p className="text-sm mt-2">Las tareas asignadas a ti o las tareas vencidas aparecerán aquí.</p>
+            {groupedByTeam.length === 0 && rootMyTasks.length === 0 && (
+                <div className="text-center py-16 text-gray-500 dark:text-gray-400">
+                    <p>No tienes tareas asignadas.</p>
+                    <p className="text-sm mt-2">Las tareas asignadas a ti o las tareas vencidas aparecerán aquí.</p>
+                </div>
+            )}
+
+            {groupedByTeam.map(group => (
+                <div key={group.team?.id || 'personal'} className="mb-6">
+                    <div className="flex items-center mb-3">
+                        <Users className="w-4 h-4 mr-2 text-gray-400" />
+                        <h3 className="text-sm font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">{group.teamName}</h3>
+                        <span className="ml-2 text-xs bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 px-2 py-0.5 rounded-full">{group.tasks.length}</span>
                     </div>
-                )}
-                {rootMyTasks.map(task => (
-                    <WorkloadTaskItem 
-                        key={task.id} task={task} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
-                        onNavigate={onNavigate} onTake={onTake} onComplete={onComplete} onRevert={onRevert}
-                        onEdit={onEdit} onRestore={onRestore} loggedInUser={loggedInUser} team={team}
-                    />
-                ))}
-            </div>
+                    <div className="space-y-2">
+                        {group.tasks.map(task => (
+                            <WorkloadTaskItem
+                                key={task.id} task={task} allTasks={allTasks} getAggregatedHours={getAggregatedHours}
+                                onNavigate={onNavigate} onTake={onTake} onComplete={onComplete} onRevert={onRevert}
+                                onEdit={onEdit} onRestore={onRestore} loggedInUser={loggedInUser} team={team}
+                            />
+                        ))}
+                    </div>
+                </div>
+            ))}
         </div>
     );
 }

@@ -12,8 +12,8 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { initializeApp } from 'firebase/app';
 import { getAuth, onAuthStateChanged, signOut } from 'firebase/auth';
-import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion, writeBatch, getDoc, setDoc } from 'firebase/firestore';
-import { Plus, Users, LogOut, Home, ChevronRight, Briefcase } from 'lucide-react';
+import { getFirestore, collection, doc, addDoc, updateDoc, onSnapshot, query, where, Timestamp, deleteDoc, arrayUnion, arrayRemove, writeBatch, getDoc, setDoc, getDocs } from 'firebase/firestore';
+import { Plus, Users, LogOut, Home, ChevronRight, Briefcase, Mail, UserPlus } from 'lucide-react';
 
 // --- Componentes de la aplicación ---
 import AuthScreen from './components/AuthScreen';
@@ -28,6 +28,10 @@ import UserManagement from './components/UserManagement';
 import ProjectsDashboard from './components/ProjectsDashboard';
 import TeamManagement from './components/TeamManagement';
 import MyWorkloadDashboard from './components/MyWorkloadDashboard';
+import TeamsDashboard from './components/TeamsDashboard';
+import TeamView from './components/TeamView';
+import CreateTeamModal from './components/CreateTeamModal';
+import InviteMemberModal from './components/InviteMemberModal';
 
 // --- Lee la configuración de Firebase desde las variables de entorno ---
 const firebaseConfig = {
@@ -48,6 +52,8 @@ const auth = getAuth(app);
 const tasksCollectionPath = `tasks`;
 const teamCollectionPath = `team_members`;
 const messagesCollectionPath = `messages`;
+const teamsCollectionPath = `teams`;
+const invitationsCollectionPath = `invitations`;
 
 
 export default function App() {
@@ -62,8 +68,16 @@ export default function App() {
     const [messages, setMessages] = useState([]);
     
     const [allTasks, setAllTasks] = useState([]);
-    const [currentView, setCurrentView] = useState('dashboard');
+    const [currentView, setCurrentView] = useState('teams');
     const [breadcrumbs, setBreadcrumbs] = useState([{ id: null, title: 'Proyectos' }]);
+
+    // --- Estado de equipos ---
+    const [userTeams, setUserTeams] = useState([]);
+    const [pendingInvitations, setPendingInvitations] = useState([]);
+    const [selectedTeam, setSelectedTeam] = useState(null);
+    const [isCreateTeamModalOpen, setIsCreateTeamModalOpen] = useState(false);
+    const [isInviteModalOpen, setIsInviteModalOpen] = useState(false);
+    const [teamToInvite, setTeamToInvite] = useState(null);
 
     const currentParentId = breadcrumbs[breadcrumbs.length - 1].id;
     
@@ -146,10 +160,24 @@ export default function App() {
             setTeam(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() })));
         });
 
+        // Listener de equipos del usuario
+        const qTeams = query(collection(db, teamsCollectionPath), where('memberIds', 'array-contains', loggedInUser.uid));
+        const unsubscribeTeams = onSnapshot(qTeams, (snapshot) => {
+            setUserTeams(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
+        // Listener de invitaciones pendientes
+        const qInvitations = query(collection(db, invitationsCollectionPath), where('invitedEmail', '==', loggedInUser.email), where('status', '==', 'pending'));
+        const unsubscribeInvitations = onSnapshot(qInvitations, (snapshot) => {
+            setPendingInvitations(snapshot.docs.map(d => ({ id: d.id, ...d.data() })));
+        });
+
         return () => {
             unsubscribeTasks();
             unsubscribeTeam();
             unsubscribeMessages();
+            unsubscribeTeams();
+            unsubscribeInvitations();
         };
     }, [loggedInUser]);
 
@@ -214,8 +242,152 @@ export default function App() {
      */
     const navigateToDashboard = () => {
         setBreadcrumbs([{ id: null, title: 'Proyectos' }]);
-        setCurrentView('dashboard');
+        if (selectedTeam) {
+            setCurrentView('team-view');
+        } else {
+            setCurrentView('dashboard');
+        }
     }
+
+    const navigateToTeams = () => {
+        setSelectedTeam(null);
+        setCurrentView('teams');
+    };
+
+    const navigateToTeamView = (team) => {
+        setSelectedTeam(team);
+        setBreadcrumbs([{ id: null, title: 'Proyectos' }]);
+        setCurrentView('team-view');
+    };
+
+    // --- CRUD de equipos ---
+
+    const handleCreateTeam = async (teamData) => {
+        try {
+            await addDoc(collection(db, teamsCollectionPath), {
+                name: teamData.name,
+                description: teamData.description,
+                ownerId: loggedInUser.uid,
+                members: [{ userId: loggedInUser.uid, role: 'owner' }],
+                memberIds: [loggedInUser.uid],
+                createdAt: Timestamp.now()
+            });
+            setIsCreateTeamModalOpen(false);
+        } catch (error) { console.error("Error al crear equipo:", error); }
+    };
+
+    const handleInviteToTeam = async (email) => {
+        const q = query(collection(db, teamCollectionPath), where("email", "==", email));
+        const snapshot = await getDocs(q);
+        if (snapshot.empty) throw new Error("No se ha encontrado ningún usuario con ese email.");
+
+        const invitedUserId = snapshot.docs[0].id;
+        if (teamToInvite.memberIds?.includes(invitedUserId)) throw new Error("Este usuario ya es miembro del equipo.");
+
+        const qExisting = query(collection(db, invitationsCollectionPath), where('teamId', '==', teamToInvite.id), where('invitedEmail', '==', email), where('status', '==', 'pending'));
+        const existingSnapshot = await getDocs(qExisting);
+        if (!existingSnapshot.empty) throw new Error("Ya existe una invitación pendiente para este usuario.");
+
+        await addDoc(collection(db, invitationsCollectionPath), {
+            teamId: teamToInvite.id,
+            teamName: teamToInvite.name,
+            invitedBy: loggedInUser.uid,
+            invitedByName: loggedInUser.username,
+            invitedEmail: email,
+            status: 'pending',
+            createdAt: Timestamp.now()
+        });
+    };
+
+    const handleAcceptInvitation = async (invitation) => {
+        try {
+            const batch = writeBatch(db);
+            batch.update(doc(db, invitationsCollectionPath, invitation.id), { status: 'accepted' });
+            const teamRef = doc(db, teamsCollectionPath, invitation.teamId);
+            batch.update(teamRef, {
+                members: arrayUnion({ userId: loggedInUser.uid, role: 'member' }),
+                memberIds: arrayUnion(loggedInUser.uid)
+            });
+            const teamProjects = allTasks.filter(t => t.teamId === invitation.teamId && t.isProject && !t.deleted);
+            teamProjects.forEach(project => {
+                batch.update(doc(db, tasksCollectionPath, project.id), {
+                    team: arrayUnion({ userId: loggedInUser.uid, role: 'member' }),
+                    memberIds: arrayUnion(loggedInUser.uid)
+                });
+            });
+            await batch.commit();
+        } catch (error) { console.error("Error al aceptar invitación:", error); }
+    };
+
+    const handleDeclineInvitation = async (invitationId) => {
+        try {
+            await updateDoc(doc(db, invitationsCollectionPath, invitationId), { status: 'declined' });
+        } catch (error) { console.error("Error al rechazar invitación:", error); }
+    };
+
+    const handleLeaveTeam = async (teamId) => {
+        if (!window.confirm("¿Estás seguro de que quieres abandonar este equipo?")) return;
+        try {
+            const teamDoc = userTeams.find(t => t.id === teamId);
+            if (!teamDoc) return;
+            const memberEntry = teamDoc.members.find(m => m.userId === loggedInUser.uid);
+            if (!memberEntry) return;
+
+            const batch = writeBatch(db);
+            batch.update(doc(db, teamsCollectionPath, teamId), {
+                members: arrayRemove(memberEntry),
+                memberIds: arrayRemove(loggedInUser.uid)
+            });
+            const teamProjects = allTasks.filter(t => t.teamId === teamId && t.isProject && !t.deleted);
+            teamProjects.forEach(project => {
+                const projMember = project.team?.find(m => m.userId === loggedInUser.uid);
+                if (projMember) {
+                    batch.update(doc(db, tasksCollectionPath, project.id), {
+                        team: arrayRemove(projMember),
+                        memberIds: arrayRemove(loggedInUser.uid)
+                    });
+                }
+            });
+            await batch.commit();
+            if (selectedTeam?.id === teamId) navigateToTeams();
+        } catch (error) { console.error("Error al abandonar equipo:", error); }
+    };
+
+    const handleRemoveFromTeam = async (teamId, userId) => {
+        if (!window.confirm("¿Eliminar a este usuario del equipo?")) return;
+        try {
+            const teamDoc = userTeams.find(t => t.id === teamId);
+            if (!teamDoc) return;
+            const memberEntry = teamDoc.members.find(m => m.userId === userId);
+            if (!memberEntry) return;
+
+            const batch = writeBatch(db);
+            batch.update(doc(db, teamsCollectionPath, teamId), {
+                members: arrayRemove(memberEntry),
+                memberIds: arrayRemove(userId)
+            });
+            const teamProjects = allTasks.filter(t => t.teamId === teamId && t.isProject && !t.deleted);
+            teamProjects.forEach(project => {
+                const projMember = project.team?.find(m => m.userId === userId);
+                if (projMember) {
+                    batch.update(doc(db, tasksCollectionPath, project.id), {
+                        team: arrayRemove(projMember),
+                        memberIds: arrayRemove(userId)
+                    });
+                }
+            });
+            await batch.commit();
+        } catch (error) { console.error("Error al eliminar miembro:", error); }
+    };
+
+    const handleChangeTeamRole = async (teamId, userId, newRole) => {
+        try {
+            const teamDoc = userTeams.find(t => t.id === teamId);
+            if (!teamDoc) return;
+            const newMembers = teamDoc.members.map(m => m.userId === userId ? { ...m, role: newRole } : m);
+            await updateDoc(doc(db, teamsCollectionPath, teamId), { members: newMembers });
+        } catch (error) { console.error("Error al cambiar rol:", error); }
+    };
 
     /**
      * Verifica si el usuario es owner del proyecto/tarea
@@ -266,8 +438,14 @@ export default function App() {
                 
                 if (taskData.parentId === null) {
                     newTask.ownerId = loggedInUser.uid;
-                    newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
-                    newTask.memberIds = [loggedInUser.uid];
+                    if (selectedTeam) {
+                        newTask.teamId = selectedTeam.id;
+                        newTask.team = selectedTeam.members.map(m => ({ userId: m.userId, role: m.role === 'owner' ? 'admin' : m.role }));
+                        newTask.memberIds = selectedTeam.memberIds || [loggedInUser.uid];
+                    } else {
+                        newTask.team = [{ userId: loggedInUser.uid, role: 'admin' }];
+                        newTask.memberIds = [loggedInUser.uid];
+                    }
                     const docRef = await addDoc(collection(db, tasksCollectionPath), newTask);
                     await updateDoc(docRef, { projectId: docRef.id });
                 } else {
@@ -276,6 +454,7 @@ export default function App() {
                     newTask.team = parentTask.team;
                     newTask.memberIds = parentTask.memberIds;
                     newTask.projectId = parentTask.projectId;
+                    newTask.teamId = parentTask.teamId || null;
                     await addDoc(collection(db, tasksCollectionPath), newTask);
                 }
             }
@@ -606,7 +785,10 @@ export default function App() {
             <header className="bg-white dark:bg-gray-800 shadow-sm p-4 flex justify-between items-center">
                 <div className="font-bold text-xl text-sky-600 dark:text-sky-400">Synaptic Flow</div>
                 <div className="flex items-center space-x-4">
-                    <button onClick={navigateToDashboard} title="Ver Proyectos" className="p-2 text-gray-500 hover:text-sky-600 dark:hover:text-sky-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><Home className="w-5 h-5"/></button>
+                    <button onClick={navigateToTeams} title="Mis Equipos" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'teams' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500 hover:text-sky-600 dark:hover:text-sky-400'}`}>
+                        <Users className="w-5 h-5"/>
+                    </button>
+                    <button onClick={navigateToDashboard} title="Ver Proyectos" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'dashboard' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500 hover:text-sky-600 dark:hover:text-sky-400'}`}><Home className="w-5 h-5"/></button>
                     <button onClick={() => setCurrentView('inbox')} title="Bandeja de Entrada" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'inbox' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500'}`}>
                         <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v6m16 0v6a2 2 0 01-2 2H6a2 2 0 01-2-2v-6m16 0h-4.5a2 2 0 01-2-2v-2.5M4 13h16M8 21h8" />
@@ -614,7 +796,7 @@ export default function App() {
                     </button>
                     <button onClick={() => setCurrentView('my-workload')} title="Mi Carga de Trabajo" className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700 ${currentView === 'my-workload' ? 'text-sky-600 dark:text-sky-400 bg-sky-50 dark:bg-sky-900/30' : 'text-gray-500'} relative`}>
                         <Briefcase className="w-5 h-5"/>
-                        {messages.length > 0 && <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white"></span>}
+                        {(messages.length > 0 || pendingInvitations.length > 0) && <span className="absolute top-0 right-0 block h-2 w-2 rounded-full bg-red-500 ring-2 ring-white dark:ring-gray-800"></span>}
                     </button>
                     <span className="text-sm text-gray-600 dark:text-gray-300">Hola, <span className="font-bold">{loggedInUser.username}</span>!</span>
                     <button onClick={() => signOut(auth)} title="Cerrar Sesión" className="p-2 text-gray-500 hover:text-red-600 dark:hover:text-red-400 rounded-full hover:bg-gray-100 dark:hover:bg-gray-700"><LogOut className="w-5 h-5"/></button>
@@ -623,24 +805,48 @@ export default function App() {
             <main className="h-[calc(100vh-68px)] p-4 sm:p-6 lg:p-8">
                  <div className="flex justify-between items-center mb-6">
                     <nav className="flex items-center text-sm font-medium text-gray-500 dark:text-gray-400">
-                        {currentView === 'kanban' && breadcrumbs.map((crumb, index) => (
-                            <React.Fragment key={crumb.id || 'root'}>
-                                {index > 0 && <ChevronRight className="w-4 h-4 mx-1" />}
-                                <button onClick={() => navigateToBreadcrumb(index)} className={`hover:text-sky-600 dark:hover:text-sky-400 ${index === breadcrumbs.length - 1 ? 'text-gray-800 dark:text-white font-semibold' : ''}`}>
-                                    {index === 0 ? <Home className="w-4 h-4 inline-block mr-1" /> : null} {crumb.title}
-                                </button>
-                            </React.Fragment>
-                        ))}
-                        {currentView === 'inbox' && <span className="text-gray-800 dark:text-white font-semibold">📥 Bandeja de Entrada</span>}
+                        {currentView === 'team-view' && selectedTeam && (
+                            <>
+                                <button onClick={navigateToTeams} className="hover:text-sky-600 dark:hover:text-sky-400 flex items-center"><Users className="w-4 h-4 mr-1" /> Equipos</button>
+                                <ChevronRight className="w-4 h-4 mx-1" />
+                                <span className="text-gray-800 dark:text-white font-semibold">{selectedTeam.name}</span>
+                            </>
+                        )}
+                        {currentView === 'kanban' && (
+                            <>
+                                {selectedTeam && (
+                                    <>
+                                        <button onClick={navigateToTeams} className="hover:text-sky-600 dark:hover:text-sky-400 flex items-center"><Users className="w-4 h-4 mr-1" /> Equipos</button>
+                                        <ChevronRight className="w-4 h-4 mx-1" />
+                                        <button onClick={() => navigateToTeamView(selectedTeam)} className="hover:text-sky-600 dark:hover:text-sky-400">{selectedTeam.name}</button>
+                                        <ChevronRight className="w-4 h-4 mx-1" />
+                                    </>
+                                )}
+                                {breadcrumbs.map((crumb, index) => (
+                                    <React.Fragment key={crumb.id || 'root'}>
+                                        {index > 0 && <ChevronRight className="w-4 h-4 mx-1" />}
+                                        <button onClick={() => navigateToBreadcrumb(index)} className={`hover:text-sky-600 dark:hover:text-sky-400 ${index === breadcrumbs.length - 1 ? 'text-gray-800 dark:text-white font-semibold' : ''}`}>
+                                            {!selectedTeam && index === 0 ? <Home className="w-4 h-4 inline-block mr-1" /> : null} {crumb.title}
+                                        </button>
+                                    </React.Fragment>
+                                ))}
+                            </>
+                        )}
+                        {currentView === 'inbox' && <span className="text-gray-800 dark:text-white font-semibold">Bandeja de Entrada</span>}
                     </nav>
-                    {currentView !== 'my-workload' && (
-                        <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center">
-                            <Plus className="w-5 h-5 mr-2" /> 
-                            {currentView === 'inbox' ? 'Nueva Tarea' : currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}
-                        </button>
-                    )}
+                    <div className="flex items-center space-x-2">
+                        {currentView === 'teams' && <button onClick={() => setIsCreateTeamModalOpen(true)} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center"><Plus className="w-5 h-5 mr-2" /> Nuevo Equipo</button>}
+                        {(currentView === 'team-view' || currentView === 'kanban' || currentView === 'dashboard' || currentView === 'inbox') && (
+                            <button onClick={() => openTaskModal()} className="bg-sky-500 text-white px-4 py-2 rounded-lg shadow hover:bg-sky-600 flex items-center">
+                                <Plus className="w-5 h-5 mr-2" />
+                                {currentView === 'inbox' ? 'Nueva Tarea' : currentParentId ? 'Nueva Subtarea' : 'Nuevo Proyecto'}
+                            </button>
+                        )}
+                    </div>
                 </div>
                 
+                {currentView === 'teams' && <TeamsDashboard userTeams={userTeams} allTasks={activeTasks} loggedInUser={loggedInUser} onOpenTeam={(team) => { if (team) navigateToTeamView(team); else { setSelectedTeam(null); setCurrentView('dashboard'); } }} onInvite={(team) => { setTeamToInvite(team); setIsInviteModalOpen(true); }} onLeaveTeam={handleLeaveTeam} pendingInvitations={pendingInvitations} onAcceptInvitation={handleAcceptInvitation} onDeclineInvitation={handleDeclineInvitation} />}
+                {currentView === 'team-view' && selectedTeam && <TeamView team={selectedTeam} allTasks={activeTasks} allUsers={team} loggedInUser={loggedInUser} onNavigateToProject={navigateToTask} onEditProject={openTaskModal} onDeleteProject={handleDeleteTask} onInvite={(t) => { setTeamToInvite(t); setIsInviteModalOpen(true); }} onRemoveMember={handleRemoveFromTeam} onChangeRole={handleChangeTeamRole} />}
                 {currentView === 'dashboard' && (
                     <DashboardSplit
                         projects={userProjects}
@@ -671,12 +877,14 @@ export default function App() {
                     </div>
                 )}
                 {currentView === 'inbox' && <InboxDashboard tasks={inboxTasks} allTasks={allTasks} onNavigate={navigateToTask} onEdit={openTaskModal} onDelete={handleDeleteTask} onRestore={handleRestoreTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} loggedInUser={loggedInUser} team={team} />}
-                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onRestore={handleRestoreTask} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} />}
+                {currentView === 'my-workload' && <MyWorkloadDashboard allTasks={activeTasks} loggedInUser={loggedInUser} getAggregatedHours={getAggregatedHours} onNavigate={navigateToTask} onTake={handleTakeTask} onComplete={setTaskToLogHours} onRevert={handleRevertTask} onEdit={openTaskModal} team={team} messages={messages} onRestore={handleRestoreTask} onApproveLink={handleApproveLinkingRequest} onDeclineLink={handleDeclineLinkingRequest} userTeams={userTeams} pendingInvitations={pendingInvitations} onAcceptInvitation={handleAcceptInvitation} onDeclineInvitation={handleDeclineInvitation} />}
 
             </main>
             {isTeamModalOpen && <Modal onClose={closeTeamModal}><TeamManagement project={projectToManage} allUsers={team} db={db} tasksCollectionPath={tasksCollectionPath} loggedInUser={loggedInUser} onClose={closeTeamModal} canManageTeam={canManageTeam} /></Modal>}
             {isTaskModalOpen && <Modal onClose={closeTaskModal}><TaskForm onSave={handleSaveTask} onLinkProject={handleCreateLinkingRequest} onClose={closeTaskModal} allTasks={activeTasks} taskToEdit={taskToEdit} parentId={currentParentId} loggedInUser={loggedInUser} team={team} /></Modal>}
             {taskToLogHours && <Modal onClose={() => setTaskToLogHours(null)}><LogHoursModal onSave={handleLogHoursAndComplete} onCancel={() => setTaskToLogHours(null)} task={taskToLogHours} /></Modal>}
+            {isCreateTeamModalOpen && <Modal onClose={() => setIsCreateTeamModalOpen(false)}><CreateTeamModal onSave={handleCreateTeam} onClose={() => setIsCreateTeamModalOpen(false)} /></Modal>}
+            {isInviteModalOpen && teamToInvite && <Modal onClose={() => setIsInviteModalOpen(false)}><InviteMemberModal teamName={teamToInvite.name} onInvite={handleInviteToTeam} onClose={() => setIsInviteModalOpen(false)} /></Modal>}
         </div>
     );
 }
