@@ -55,13 +55,49 @@ service cloud.firestore {
       );
       
       allow update: if isAuthenticated() && (
-        isOwner(resource.data) || 
-        (isCollaborator(resource.data) && isProjectAdmin(resource.data))
+        isOwner(resource.data) ||
+        isCollaborator(resource.data)
       );
       
       allow delete: if isAuthenticated() && isOwner(resource.data);
     }
     
+    // ============================================
+    // TEAMS COLLECTION
+    // ============================================
+    match /teams/{teamId} {
+      allow read: if isAuthenticated() && getUserId() in resource.data.memberIds;
+
+      allow create: if isAuthenticated() && (
+        request.resource.data.ownerId == getUserId() &&
+        request.resource.data.memberIds.hasAll([getUserId()])
+      );
+
+      allow update: if isAuthenticated() && getUserId() in resource.data.memberIds;
+
+      allow delete: if isAuthenticated() && resource.data.ownerId == getUserId();
+    }
+
+    // ============================================
+    // INVITATIONS COLLECTION
+    // ============================================
+    match /invitations/{invitationId} {
+      // Invitee can read their own invitations, team members can read team invitations
+      allow read: if isAuthenticated();
+
+      // Any authenticated user can create invitations (validated in app logic)
+      allow create: if isAuthenticated() && (
+        request.resource.data.invitedBy == getUserId()
+      );
+
+      // Invitee can update status (accept/decline)
+      allow update: if isAuthenticated() && (
+        resource.data.invitedEmail == request.auth.token.email
+      );
+
+      allow delete: if false;
+    }
+
     // ============================================
     // TEAM_MEMBERS COLLECTION
     // ============================================
